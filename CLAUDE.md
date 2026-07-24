@@ -44,8 +44,15 @@ get working code fast. When helping:
     exposes `get_connection()` which returns a **fresh** `psycopg.connect(...)` connection per
     call (deliberately not a single shared connection, and not yet a pool — see below). Verified
     working end-to-end (connects successfully to `servicd`).
-- `README.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
-  sync when project state changes — this file is for my working context, `README.md` is for
+  - `main.py` — first working FastAPI endpoint, `POST /users`: validates the request body via a
+    Pydantic `UserCreate` model (`username`, `password`, optional `name`), hashes the password
+    with `bcrypt.hashpw` (salt embedded automatically — see schema notes below), inserts via a
+    parameterized query (`%s` placeholders, values passed as a separate params tuple — not
+    string-formatted, to avoid SQL injection) using `RETURNING user_id`, and returns
+    `user_id`/`username`/`name` only (never `password_hash`). Verified working end-to-end via
+    `uvicorn main:app --reload` + a real POST request; row confirmed correct in `psql`.
+- `readme.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
+  sync when project state changes — this file is for my working context, `readme.md` is for
   humans/GitHub visitors.
 
 ## Finalized Database Schema
@@ -59,7 +66,6 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
 - `name` — TEXT, nullable
 - `username` — TEXT, NOT NULL, UNIQUE
 - `password_hash` — VARCHAR(60) NOT NULL (bcrypt-length; never store raw passwords)
-- `salt` — VARCHAR(60) NOT NULL
 
 **car_config** (reusable make/model/year/engine combo, decoupled from any individual physical car)
 - `config_id` — SERIAL PRIMARY KEY
@@ -126,9 +132,14 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
 ## Key Design Decisions & Reasoning
 - **Money stored as integer cents**, not float/decimal directly, to avoid floating-point rounding
   errors compounding across many transactions. Convert to dollars only for display in app code.
-- **Passwords are hashed + salted**, never stored in plain text. Salt is per-user and random,
-  stored alongside the hash (not secret — its job is uniqueness, not secrecy), so identical
-  passwords across users don't produce identical hashes.
+- **Passwords are hashed with bcrypt**, never stored in plain text. Originally the schema had a
+  separate `salt` column, but investigation (via `bcrypt.hashpw`/`checkpw`) confirmed bcrypt
+  generates a random salt per call and embeds it directly inside the 60-char hash string itself
+  (`$2b$<cost>$<22-char salt><31-char hash>`) — `checkpw` needs no separate salt argument. A
+  standalone `salt` column was therefore redundant and has been dropped from both `servicdDB.sql`
+  and the live table (table was still empty, so no migration/backfill was needed). Identical
+  passwords across users still produce different hashes, since bcrypt's embedded salt is random
+  per call regardless.
 - **VIN uses VARCHAR(17)** (fixed length) as a built-in guardrail against malformed data, since
   VINs are always exactly 17 characters.
 - **car_config exists separately from car** so make/model/year/engine data (and manufacturer
@@ -153,10 +164,9 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
   planned as a learning step once a basic endpoint is working end-to-end (see Next Steps).
 
 ## Next Steps (not yet done)
-1. Build the first FastAPI endpoint: `POST /users` (insert), chosen as the starting table since
-   `users` has no foreign key dependencies. Immediate open question to resolve before writing the
-   insert logic: does bcrypt embed its salt inside the resulting hash string itself, and if so,
-   is the schema's separate `salt` column actually redundant for a bcrypt-based implementation?
-2. Once a first endpoint works end-to-end, revisit `get_connection()` and learn/introduce
-   `psycopg_pool` connection pooling as the production-grade pattern.
+1. Build additional endpoints — likely next: a login endpoint (look up `users` by `username`,
+   verify with `bcrypt.checkpw`), then endpoints for `car`/`car_config` (first tables with FK
+   dependencies on `users`).
+2. Revisit `get_connection()` and learn/introduce `psycopg_pool` connection pooling as the
+   production-grade pattern, now that one endpoint works end-to-end.
 3. Trace a full user scenario through the schema alongside writing further insert logic.

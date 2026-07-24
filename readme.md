@@ -15,7 +15,8 @@ cross-platform.
 
 ## Project Status
 
-Early development. Database schema is finalized and live; backend API is in progress.
+Early development. Database schema is finalized and live. Backend API is in progress — first
+working endpoint is `POST /users` (create a user, with bcrypt password hashing).
 
 ## Getting Started
 

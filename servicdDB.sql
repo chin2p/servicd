@@ -2,8 +2,7 @@ CREATE TABLE users (
     user_id SERIAL PRIMARY KEY,
     name TEXT,
     username TEXT UNIQUE NOT NULL,
-    password_hash VARCHAR(60) NOT NULL,
-    salt VARCHAR(60) NOT NULL
+    password_hash VARCHAR(60) NOT NULL
 );
 
 CREATE TABLE car_config (
