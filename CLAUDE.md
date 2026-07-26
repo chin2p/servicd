@@ -18,7 +18,8 @@ get working code fast. When helping:
 - **Backend:** Python + FastAPI, served via Uvicorn; `psycopg` (v3) as the raw DB driver — chosen
   deliberately over an ORM (e.g. SQLAlchemy) for now, to build real SQL fluency first; may
   introduce an ORM later once comfortable. `python-dotenv` loads DB credentials from `.env`
-  (git-ignored) rather than hardcoding them.
+  (git-ignored) rather than hardcoding them. `bcrypt` for password hashing, `pyjwt` for
+  authentication tokens (see login/auth design below).
 - **Database:** PostgreSQL (database name: `servicd`)
 - **Frontend:** React + TypeScript (via Vite), ESLint for linting
 - **Mobile (future, not started):** Native — Swift/SwiftUI (iOS), Kotlin/Jetpack Compose (Android).
@@ -29,7 +30,8 @@ get working code fast. When helping:
   `brew services start/stop postgresql@18` (user prefers not to leave it running all the time)
 - Database renamed from `car_maintenance` to `servicd`; connect via `psql servicd`
 - Python virtual environment created at `~/servicd/venv`, activate via `source venv/bin/activate`
-- `fastapi`, `uvicorn`, `psycopg[binary]`, and `python-dotenv` all installed in the venv
+- `fastapi`, `uvicorn`, `psycopg[binary]`, `python-dotenv`, `bcrypt`, and `pyjwt` all installed
+  in the venv
 - React + TypeScript scaffolded via Vite in `~/servicd/frontend`, ESLint configured, dev server
   confirmed working at `localhost:5173`
 - All 8 tables created in the live `servicd` database by running `servicdDB.sql` (with finalized
@@ -39,18 +41,27 @@ get working code fast. When helping:
   https://github.com/chin2p/servicd (remote `origin`, branch `main`)
 - `backend/` directory created, containing:
   - `.env` (git-ignored) — holds `DB_NAME`, `DB_HOST`, `DB_USER`, `DB_PASSWORD` (blank — local
-    Homebrew Postgres uses trust auth for the OS user, no real password), `DB_PORT`
-  - `db.py` — loads `.env` via `load_dotenv()`, reads the five values via `os.getenv`, and
-    exposes `get_connection()` which returns a **fresh** `psycopg.connect(...)` connection per
-    call (deliberately not a single shared connection, and not yet a pool — see below). Verified
-    working end-to-end (connects successfully to `servicd`).
-  - `main.py` — first working FastAPI endpoint, `POST /users`: validates the request body via a
-    Pydantic `UserCreate` model (`username`, `password`, optional `name`), hashes the password
-    with `bcrypt.hashpw` (salt embedded automatically — see schema notes below), inserts via a
-    parameterized query (`%s` placeholders, values passed as a separate params tuple — not
-    string-formatted, to avoid SQL injection) using `RETURNING user_id`, and returns
-    `user_id`/`username`/`name` only (never `password_hash`). Verified working end-to-end via
-    `uvicorn main:app --reload` + a real POST request; row confirmed correct in `psql`.
+    Homebrew Postgres uses trust auth for the OS user, no real password), `DB_PORT`, and
+    `SECRET_KEY` (random 64-char hex string via `secrets.token_hex(32)`, used to sign JWTs)
+  - `db.py` — loads `.env` via `load_dotenv()`, reads the values via `os.getenv` (including
+    `secret_key`, imported into `main.py` — noted as thematically mismatched with a DB module,
+    candidate for a separate config module later), and exposes `get_connection()` which returns
+    a **fresh** `psycopg.connect(...)` connection per call (deliberately not a single shared
+    connection, and not yet a pool — see below). Verified working end-to-end.
+  - `main.py` — two working FastAPI endpoints:
+    - `POST /users`: validates the request body via a Pydantic `UserCreate` model (`username`,
+      `password`, optional `name`), hashes the password with `bcrypt.hashpw` (salt embedded
+      automatically — see schema notes below), inserts via a parameterized query (`%s`
+      placeholders, values passed as a separate params tuple — not string-formatted, to avoid
+      SQL injection) using `RETURNING user_id`, and returns `user_id`/`username`/`name` only
+      (never `password_hash`).
+    - `POST /login`: looks up the user by `username` (parameterized `SELECT`), then verifies the
+      password against the stored hash with `bcrypt.checkpw`. On success, returns a signed JWT
+      (`pyjwt`, `HS256`, payload `{"sub": user_id, "exp": <now + 1 day>}`). See "Login/Auth
+      Design" below for the full security reasoning (timing-safe dummy-hash check, generic error
+      messages, why JWT over session cookies).
+    - Both verified working end-to-end via `uvicorn main:app --reload` + real requests; rows/
+      tokens confirmed correct in `psql` and via local `jwt.decode()`.
 - `readme.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
   sync when project state changes — this file is for my working context, `readme.md` is for
   humans/GitHub visitors.
@@ -163,10 +174,44 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
   concurrent FastAPI requests. Real production pattern would be a connection pool (`psycopg_pool`),
   planned as a learning step once a basic endpoint is working end-to-end (see Next Steps).
 
+## Login/Auth Design
+- **`POST /login` never reveals whether a username exists.** Wrong password and nonexistent
+  username both return the identical `401` + `"Invalid username or password"` — prevents a
+  username-enumeration vulnerability where an attacker could distinguish real accounts from fake
+  ones via differing error text.
+- **Timing-safe lookup, not just a matching error message.** Even a generic error message can
+  leak the same info via response time, since a real `bcrypt.checkpw` call is deliberately slow
+  and a "user not found, return immediately" path would be conspicuously fast by comparison. Fix:
+  a `dummy_hash` (bcrypt hash of a throwaway placeholder string) is generated once at module load,
+  and the nonexistent-username branch still runs a real `bcrypt.checkpw` against it (result
+  discarded) before responding, so both branches always do equal work. Considered a random sleep
+  instead — rejected, since it only adds noise on top of genuinely different work, is statistically
+  distinguishable over many samples, and requires manually tuning the delay to match real bcrypt
+  timing (which drifts if the cost factor ever changes).
+- **JWT chosen over server-side session cookies** for the auth token itself, specifically because
+  of the planned native iOS/Android apps (see Project Overview) — cookies are a browser-specific
+  mechanism, while a bearer token in an `Authorization` header works identically across a web
+  frontend and future native clients. Trade-off accepted: unlike server-side sessions, a JWT can't
+  be individually revoked before it expires, since nothing is stored server-side.
+- **Payload only contains `sub` (user_id) and `exp`.** Important underlying concept: a JWT is
+  *signed, not encrypted* — the payload is just base64-encoded and trivially readable by anyone
+  holding the token (verified firsthand by decoding a real token on jwt.io without supplying the
+  secret — payload was readable, only the signature check failed). This means nothing sensitive
+  (e.g. `password_hash`) can ever go in the payload.
+- **`exp` set to 1 day** as a starting point — short enough to limit damage if a token leaks, long
+  enough to not be annoying during development. Noted future refinement: the more robust
+  production pattern is a short-lived access token plus a separate longer-lived refresh token,
+  deferred for now (same "simple first, refine later" reasoning as connection pooling).
+- **Signing secret lives in `.env`** (`SECRET_KEY`), generated via `secrets.token_hex(32)` —
+  same reasoning as DB credentials: anyone who obtains it could forge valid tokens for any user.
+
 ## Next Steps (not yet done)
-1. Build additional endpoints — likely next: a login endpoint (look up `users` by `username`,
-   verify with `bcrypt.checkpw`), then endpoints for `car`/`car_config` (first tables with FK
-   dependencies on `users`).
-2. Revisit `get_connection()` and learn/introduce `psycopg_pool` connection pooling as the
-   production-grade pattern, now that one endpoint works end-to-end.
-3. Trace a full user scenario through the schema alongside writing further insert logic.
+1. Build the `Depends()` pattern in FastAPI so a protected endpoint can require a valid JWT and
+   extract `user_id` from it (via `jwt.decode`) — needed before building endpoints like
+   `POST /car`, which must know *which* user is making the request rather than trusting a
+   client-supplied `user_id` (a real vulnerability if skipped).
+2. Build `car`/`car_config` endpoints (first tables with FK dependencies on `users`), using that
+   `Depends()` auth pattern.
+3. Revisit `get_connection()` and learn/introduce `psycopg_pool` connection pooling as the
+   production-grade pattern, now that endpoints work end-to-end.
+4. Trace a full user scenario through the schema alongside writing further insert logic.

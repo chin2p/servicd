@@ -9,14 +9,15 @@ cross-platform.
 
 ## Tech Stack
 
-- **Backend:** Python, FastAPI, Uvicorn, `psycopg` (raw SQL, no ORM)
+- **Backend:** Python, FastAPI, Uvicorn, `psycopg` (raw SQL, no ORM), `bcrypt` + `pyjwt` for auth
 - **Database:** PostgreSQL
 - **Frontend:** React, TypeScript, Vite
 
 ## Project Status
 
-Early development. Database schema is finalized and live. Backend API is in progress — first
-working endpoint is `POST /users` (create a user, with bcrypt password hashing).
+Early development. Database schema is finalized and live. Backend API is in progress:
+- `POST /users` — create a user, with bcrypt password hashing
+- `POST /login` — authenticate and receive a signed JWT (1-day expiration)
 
 ## Getting Started
 
@@ -38,10 +39,10 @@ psql servicd -f servicdDB.sql
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install fastapi uvicorn "psycopg[binary]" python-dotenv
+pip install fastapi uvicorn "psycopg[binary]" python-dotenv bcrypt pyjwt
 ```
 
-Create a `backend/.env` file with your local database credentials:
+Create a `backend/.env` file with your local database credentials and a JWT signing secret:
 
 ```
 DB_NAME=servicd
@@ -49,6 +50,13 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_USER=your_postgres_user
 DB_PASSWORD=
+SECRET_KEY=
+```
+
+Generate a random value for `SECRET_KEY` with:
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 ### Frontend
