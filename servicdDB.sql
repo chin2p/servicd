@@ -10,7 +10,8 @@ CREATE TABLE car_config (
     year INT NOT NULL,
     make TEXT NOT NULL,
     model TEXT NOT NULL,
-    engine TEXT
+    engine TEXT NOT NULL,
+    UNIQUE (year, make, model, engine)
 );
 
 CREATE TABLE car (

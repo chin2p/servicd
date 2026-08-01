@@ -57,7 +57,7 @@ get working code fast. When helping:
     candidate for a separate config module later), and exposes `get_connection()` which returns
     a **fresh** `psycopg.connect(...)` connection per call (deliberately not a single shared
     connection, and not yet a pool — see below). Verified working end-to-end.
-  - `main.py` — two working FastAPI endpoints, plus a reusable auth dependency:
+  - `main.py` — three working FastAPI endpoints, plus a reusable auth dependency:
     - `POST /users`: validates the request body via a Pydantic `UserCreate` model (`username`,
       `password`, optional `name`), hashes the password with `bcrypt.hashpw` (salt embedded
       automatically — see schema notes below), inserts via a parameterized query (`%s`
@@ -78,6 +78,15 @@ get working code fast. When helping:
       `InvalidSubjectError`) even though `encode()` doesn't warn you at write time. Proven working
       end-to-end via a throwaway `GET /me` test endpoint (since removed — it was scaffolding, not
       a real feature) that returned the caller's own profile using only the token.
+    - `POST /car_config`: requires a valid token (`Depends(get_current_user)`) purely as an
+      anti-abuse gate — the row itself isn't tied to any user, so `user_id` is deliberately
+      unused in the function body; "must be authenticated to write" and "this data belongs to
+      you" are treated as separate concerns. Uses `INSERT ... ON CONFLICT (year, make, model,
+      engine) DO NOTHING RETURNING config_id`, falling back to a `SELECT` for the existing row
+      when the insert is skipped — a "find or create" pattern that's atomic (avoids a
+      check-then-insert race condition two concurrent identical requests could otherwise hit).
+      `engine` defaults to `"Unknown"` in the endpoint (not the Pydantic model) when omitted,
+      so both "field left out" and "explicitly sent as `null`" are handled the same way.
     - All verified working end-to-end via `uvicorn main:app --reload` + real requests; rows/
       tokens confirmed correct in `psql` and via local `jwt.decode()`.
 - `readme.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
@@ -101,7 +110,11 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
 - `year` — INTEGER NOT NULL
 - `make` — TEXT NOT NULL
 - `model` — TEXT NOT NULL
-- `engine` — TEXT, nullable
+- `engine` — TEXT NOT NULL (use `'Unknown'` when the client doesn't provide one, rather than
+  NULL — same NULL-uniqueness reasoning as `part.brand`, needed for the UNIQUE below to work)
+- UNIQUE (`year`, `make`, `model`, `engine`) — prevents duplicate catalog rows for the same
+  real-world car (e.g. two users both adding a "2020 Honda Civic" independently); added after
+  the table was already live but still empty, so no data migration was needed
 
 **car**
 - `car_id` — SERIAL PRIMARY KEY
@@ -224,9 +237,10 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
   same reasoning as DB credentials: anyone who obtains it could forge valid tokens for any user.
 
 ## Next Steps (not yet done)
-1. Build `car`/`car_config` endpoints (first tables with FK dependencies on `users`), using the
-   `Depends(get_current_user)` auth pattern to get `user_id` from the token rather than trusting
-   a client-supplied value.
+1. Build `POST /car` — the first endpoint where `Depends(get_current_user)`'s `user_id` actually
+   gets used (not just gatekept), since `car.user_id` must come from the token, never a
+   client-supplied value. Open design question in progress: which fields the client should
+   supply (`config_id`, `vin`, `total_miles`) vs. which the server fills in itself.
 2. Revisit `get_connection()` and learn/introduce `psycopg_pool` connection pooling as the
    production-grade pattern, now that endpoints work end-to-end.
 3. Trace a full user scenario through the schema alongside writing further insert logic.

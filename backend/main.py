@@ -19,6 +19,13 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+class CarConfigCreate(BaseModel):
+    year: int
+    make: str
+    model: str
+    engine: str | None = None  # Optional field for engine
+
+
 
 security = HTTPBearer()
 
@@ -81,3 +88,29 @@ def login(request: LoginRequest):
         else:
             raise HTTPException(status_code=401, detail="Invalid username or password")
 
+@app.post("/car_config")
+def create_car_config(car_config: CarConfigCreate, user_id: int = Depends(get_current_user)):
+    if car_config.engine:
+        engine_value = car_config.engine
+    else:
+        engine_value = "Unknown"  # Default value if engine is not provided
+
+    conn_inst = get_connection()
+    cur = conn_inst.cursor()
+    cur.execute("INSERT INTO car_config(year, make, model, engine) VALUES (%s, %s, %s, %s) ON CONFLICT (year, make, model, engine) DO NOTHING RETURNING config_id", (car_config.year, car_config.make, car_config.model, engine_value))
+    row = cur.fetchone()
+    if row is not None:
+        config_id = row[0]
+    else:
+        # If the row is None, it means the entry already exists, so we need to fetch the existing config_id
+        cur.execute("SELECT config_id FROM car_config WHERE year = %s AND make = %s AND model = %s AND engine = %s", (car_config.year, car_config.make, car_config.model, engine_value))
+        existing_row = cur.fetchone()
+        if existing_row is not None:
+            config_id = existing_row[0]
+        else:
+            raise HTTPException(status_code=500, detail="Failed to retrieve or create car configuration")
+    conn_inst.commit()
+    cur.close()
+    conn_inst.close()
+    return {"config_id": config_id, "year": car_config.year, "make": car_config.make, "model": car_config.model, "engine": engine_value}
+    

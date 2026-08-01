@@ -18,8 +18,10 @@ cross-platform.
 Early development. Database schema is finalized and live. Backend API is in progress:
 - `POST /users` — create a user, with bcrypt password hashing
 - `POST /login` — authenticate and receive a signed JWT (1-day expiration)
-- JWT-based auth dependency in place for protecting future endpoints (extracts the current user
-  from an `Authorization: Bearer <token>` header)
+- JWT-based auth dependency in place for protecting endpoints (extracts the current user from an
+  `Authorization: Bearer <token>` header)
+- `POST /car_config` — add a car configuration (year/make/model/engine), reusing an existing one
+  if the same combination already exists
 
 ## Getting Started
 
