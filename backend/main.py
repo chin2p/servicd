@@ -1,10 +1,13 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from pydantic import BaseModel
 import bcrypt
 from db import get_connection, secret_key
-from fastapi import HTTPException
+from fastapi import HTTPException, Security
+from fastapi.security import HTTPBearer
 import jwt
 from datetime import datetime, timedelta, timezone
+
+
 
 
 class UserCreate(BaseModel):
@@ -17,9 +20,24 @@ class LoginRequest(BaseModel):
     password: str
 
 
+security = HTTPBearer()
 
+def get_current_user(credentials = Security(security)):
+    token = credentials.credentials
+
+    try:
+        payload = jwt.decode(token, secret_key, algorithms=["HS256"])
+        user_id = int(payload.get("sub"))
+        return user_id
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    
 app = FastAPI()
-
 dummy_hash = bcrypt.hashpw(b"dummy_password", bcrypt.gensalt())
 
 
@@ -58,7 +76,7 @@ def login(request: LoginRequest):
     else:
         stored_hash = row[1].encode('utf-8')
         if bcrypt.checkpw(request.password.encode('utf-8'), stored_hash):
-            token = jwt.encode({"sub": row[0], "exp": datetime.now(timezone.utc) + timedelta(days=1)}, secret_key, algorithm="HS256")
+            token = jwt.encode({"sub": str(row[0]), "exp": datetime.now(timezone.utc) + timedelta(days=1)}, secret_key, algorithm="HS256")
             return {"token": token}
         else:
             raise HTTPException(status_code=401, detail="Invalid username or password")

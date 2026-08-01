@@ -18,6 +18,8 @@ cross-platform.
 Early development. Database schema is finalized and live. Backend API is in progress:
 - `POST /users` — create a user, with bcrypt password hashing
 - `POST /login` — authenticate and receive a signed JWT (1-day expiration)
+- JWT-based auth dependency in place for protecting future endpoints (extracts the current user
+  from an `Authorization: Bearer <token>` header)
 
 ## Getting Started
 

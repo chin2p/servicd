@@ -10,9 +10,18 @@ insights (e.g., cost per mile, cost breakdown by category) are core differentiat
 The user is using this project to learn backend/database/frontend concepts deeply, not just to
 get working code fast. When helping:
 - Prefer hints, questions, and guided reasoning over handing over direct answers or full code.
-- Let the user derive schema decisions, logic, and structure themselves where feasible.
-- It's fine to be more direct/give code for pure tooling/setup steps (installs, config) — the
-  Socratic approach is specifically for concepts (schema design, data types, security, architecture).
+- Let the user derive schema decisions, logic, and structure themselves where feasible. For
+  standalone design/config decisions (e.g. NOT NULL/UNIQUE choices, ON DELETE behavior, which
+  library to use), open-ended questions work well on their own.
+- **For writing actual implementation code** (endpoint logic, functions, etc.), follow this
+  structured workflow: (1) teach the underlying concept first — the "why," not just the "what";
+  (2) give pseudocode (language-agnostic steps, not real syntax) for the user to translate into
+  actual code themselves; (3) review the code they write and point out mistakes as hints/questions
+  rather than rewriting it for them; (4) once it's correct, briefly explain what the final code
+  does.
+- It's fine to be more direct/give real code for pure tooling/setup steps (installs, config,
+  terminal commands) — the guided approach above is specifically for concepts and implementation
+  logic (schema design, data types, security, architecture, endpoint code).
 
 ## Tech Stack
 - **Backend:** Python + FastAPI, served via Uvicorn; `psycopg` (v3) as the raw DB driver — chosen
@@ -48,7 +57,7 @@ get working code fast. When helping:
     candidate for a separate config module later), and exposes `get_connection()` which returns
     a **fresh** `psycopg.connect(...)` connection per call (deliberately not a single shared
     connection, and not yet a pool — see below). Verified working end-to-end.
-  - `main.py` — two working FastAPI endpoints:
+  - `main.py` — two working FastAPI endpoints, plus a reusable auth dependency:
     - `POST /users`: validates the request body via a Pydantic `UserCreate` model (`username`,
       `password`, optional `name`), hashes the password with `bcrypt.hashpw` (salt embedded
       automatically — see schema notes below), inserts via a parameterized query (`%s`
@@ -57,10 +66,19 @@ get working code fast. When helping:
       (never `password_hash`).
     - `POST /login`: looks up the user by `username` (parameterized `SELECT`), then verifies the
       password against the stored hash with `bcrypt.checkpw`. On success, returns a signed JWT
-      (`pyjwt`, `HS256`, payload `{"sub": user_id, "exp": <now + 1 day>}`). See "Login/Auth
+      (`pyjwt`, `HS256`, payload `{"sub": str(user_id), "exp": <now + 1 day>}`). See "Login/Auth
       Design" below for the full security reasoning (timing-safe dummy-hash check, generic error
       messages, why JWT over session cookies).
-    - Both verified working end-to-end via `uvicorn main:app --reload` + real requests; rows/
+    - `get_current_user(credentials = Security(HTTPBearer()))`: a reusable FastAPI dependency —
+      any endpoint adding `user_id: int = Depends(get_current_user)` as a parameter gets the
+      token verified (`jwt.decode`, signature + expiration checked) and `user_id` extracted
+      before the endpoint body runs; raises `401` on missing/expired/invalid tokens. Note:
+      `sub` must be cast to `str` when encoding and back to `int` when decoding — the JWT spec
+      (RFC 7519) requires `sub` to be a string, which `pyjwt`'s `decode()` enforces (raises
+      `InvalidSubjectError`) even though `encode()` doesn't warn you at write time. Proven working
+      end-to-end via a throwaway `GET /me` test endpoint (since removed — it was scaffolding, not
+      a real feature) that returned the caller's own profile using only the token.
+    - All verified working end-to-end via `uvicorn main:app --reload` + real requests; rows/
       tokens confirmed correct in `psql` and via local `jwt.decode()`.
 - `readme.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
   sync when project state changes — this file is for my working context, `readme.md` is for
@@ -206,12 +224,9 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
   same reasoning as DB credentials: anyone who obtains it could forge valid tokens for any user.
 
 ## Next Steps (not yet done)
-1. Build the `Depends()` pattern in FastAPI so a protected endpoint can require a valid JWT and
-   extract `user_id` from it (via `jwt.decode`) — needed before building endpoints like
-   `POST /car`, which must know *which* user is making the request rather than trusting a
-   client-supplied `user_id` (a real vulnerability if skipped).
-2. Build `car`/`car_config` endpoints (first tables with FK dependencies on `users`), using that
-   `Depends()` auth pattern.
-3. Revisit `get_connection()` and learn/introduce `psycopg_pool` connection pooling as the
+1. Build `car`/`car_config` endpoints (first tables with FK dependencies on `users`), using the
+   `Depends(get_current_user)` auth pattern to get `user_id` from the token rather than trusting
+   a client-supplied value.
+2. Revisit `get_connection()` and learn/introduce `psycopg_pool` connection pooling as the
    production-grade pattern, now that endpoints work end-to-end.
-4. Trace a full user scenario through the schema alongside writing further insert logic.
+3. Trace a full user scenario through the schema alongside writing further insert logic.
