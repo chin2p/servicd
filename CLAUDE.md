@@ -28,7 +28,9 @@ get working code fast. When helping:
   deliberately over an ORM (e.g. SQLAlchemy) for now, to build real SQL fluency first; may
   introduce an ORM later once comfortable. `python-dotenv` loads DB credentials from `.env`
   (git-ignored) rather than hardcoding them. `bcrypt` for password hashing, `pyjwt` for
-  authentication tokens (see login/auth design below).
+  authentication tokens (see login/auth design below). `psycopg_pool` for connection pooling
+  (see below) — all endpoints borrow connections from a shared pool rather than opening a new
+  one per request.
 - **Database:** PostgreSQL (database name: `servicd`)
 - **Frontend:** React + TypeScript (via Vite), ESLint for linting
 - **Mobile (future, not started):** Native — Swift/SwiftUI (iOS), Kotlin/Jetpack Compose (Android).
@@ -39,8 +41,8 @@ get working code fast. When helping:
   `brew services start/stop postgresql@18` (user prefers not to leave it running all the time)
 - Database renamed from `car_maintenance` to `servicd`; connect via `psql servicd`
 - Python virtual environment created at `~/servicd/venv`, activate via `source venv/bin/activate`
-- `fastapi`, `uvicorn`, `psycopg[binary]`, `python-dotenv`, `bcrypt`, and `pyjwt` all installed
-  in the venv
+- `fastapi`, `uvicorn`, `psycopg[binary]`, `python-dotenv`, `bcrypt`, `pyjwt`, and `psycopg_pool`
+  all installed in the venv
 - React + TypeScript scaffolded via Vite in `~/servicd/frontend`, ESLint configured, dev server
   confirmed working at `localhost:5173`
 - All 8 tables created in the live `servicd` database by running `servicdDB.sql` (with finalized
@@ -54,9 +56,13 @@ get working code fast. When helping:
     `SECRET_KEY` (random 64-char hex string via `secrets.token_hex(32)`, used to sign JWTs)
   - `db.py` — loads `.env` via `load_dotenv()`, reads the values via `os.getenv` (including
     `secret_key`, imported into `main.py` — noted as thematically mismatched with a DB module,
-    candidate for a separate config module later), and exposes `get_connection()` which returns
-    a **fresh** `psycopg.connect(...)` connection per call (deliberately not a single shared
-    connection, and not yet a pool — see below). Verified working end-to-end.
+    candidate for a separate config module later), and builds a `psycopg_pool.ConnectionPool`
+    (`pool`, module-level, created once at import time) from a `libpq`-style connection string
+    (`f"dbname={db_name} user={db_user} ..."`). Superseded the original `get_connection()`
+    (opened a fresh connection per call) — that function has been removed, no longer needed.
+    Verified working end-to-end, including that the pool correctly recovers a connection after
+    an aborted transaction (tested: a failed `POST /car` request immediately followed by a
+    successful `POST /car_config` on the same pool, no issues).
   - `main.py` — four working FastAPI endpoints, plus a reusable auth dependency:
     - `POST /users`: validates the request body via a Pydantic `UserCreate` model (`username`,
       `password`, optional `name`), hashes the password with `bcrypt.hashpw` (salt embedded
@@ -90,13 +96,15 @@ get working code fast. When helping:
     - `POST /car`: the first endpoint where `Depends(get_current_user)`'s `user_id` is actually
       *used* (not just gatekept) — `car.user_id` is always taken from the verified token, never
       from client input, closing the vulnerability that motivated building auth in the first
-      place. Client supplies `config_id`/`vin`/`total_miles`. Uses `with get_connection() as
-      conn_inst: with conn_inst.cursor() as cur:` instead of manual `.close()` calls, guaranteeing
-      cleanup even if the `INSERT` raises — catches `psycopg.errors.ForeignKeyViolation` (bad
-      `config_id`) and `UniqueViolation` (duplicate VIN) and turns each into a specific
-      `404`/`400` instead of a raw `500`. Chose this over reusing the `car_config`-style
-      `ON CONFLICT` pattern deliberately: a duplicate VIN is a genuine error to report, not a
-      legitimate case to silently resolve like a repeated car_config combo was.
+      place. Client supplies `config_id`/`vin`/`total_miles`. Catches
+      `psycopg.errors.ForeignKeyViolation` (bad `config_id`) and `UniqueViolation` (duplicate
+      VIN) and turns each into a specific `404`/`400` instead of a raw `500`. Chose this over
+      reusing the `car_config`-style `ON CONFLICT` pattern deliberately: a duplicate VIN is a
+      genuine error to report, not a legitimate case to silently resolve like a repeated
+      car_config combo was.
+    - All four endpoints use `with pool.connection() as conn: with conn.cursor() as cur:`
+      instead of manual `.close()` calls — guarantees the connection is returned to the pool
+      (not leaked) even when an exception/`HTTPException` is raised inside the block.
     - All verified working end-to-end via `uvicorn main:app --reload` + real requests; rows/
       tokens confirmed correct in `psql` and via local `jwt.decode()`.
 - `readme.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
@@ -210,10 +218,14 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
   history that references it. App-layer delete-confirmation UI (warn the user what will be
   removed) is just a read-only preview query before the delete — the actual cleanup is left to
   the DB via CASCADE rather than manually orchestrated in app code.
-- **`db.py`'s `get_connection()` opens a brand-new connection per call**, not a single shared
-  connection — deliberate simple starting point since a shared connection is unsafe across
-  concurrent FastAPI requests. Real production pattern would be a connection pool (`psycopg_pool`),
-  planned as a learning step once a basic endpoint is working end-to-end (see Next Steps).
+- **`db.py` uses `psycopg_pool.ConnectionPool`** instead of opening a fresh connection per call.
+  Started with "one connection per call" deliberately as the simplest correct starting point
+  (a single shared connection would be unsafe across concurrent FastAPI requests), then upgraded
+  to a real pool once multiple endpoints worked end-to-end — same "simple first, refine later"
+  reasoning used elsewhere (JWT expiration, `car_config`'s dedup logic). The pool is created
+  once at module load (critical — creating it per-request would defeat the purpose); endpoints
+  borrow a connection via `with pool.connection() as conn:`, which returns it to the pool on
+  block exit rather than closing it.
 
 ## Login/Auth Design
 - **`POST /login` never reveals whether a username exists.** Wrong password and nonexistent
@@ -247,6 +259,6 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
   same reasoning as DB credentials: anyone who obtains it could forge valid tokens for any user.
 
 ## Next Steps (not yet done)
-1. Revisit `get_connection()` and learn/introduce `psycopg_pool` connection pooling as the
-   production-grade pattern, now that endpoints work end-to-end.
-2. Trace a full user scenario through the schema alongside writing further insert logic.
+1. Build remaining endpoints (`maintenance_type`, `service`, `part`, `service_part`,
+   `service_scheduled`) to trace a full real user scenario end-to-end (add a car → log a
+   service → attach parts) before starting frontend work.

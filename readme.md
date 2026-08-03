@@ -9,7 +9,8 @@ cross-platform.
 
 ## Tech Stack
 
-- **Backend:** Python, FastAPI, Uvicorn, `psycopg` (raw SQL, no ORM), `bcrypt` + `pyjwt` for auth
+- **Backend:** Python, FastAPI, Uvicorn, `psycopg` (raw SQL, no ORM) with `psycopg_pool` for
+  connection pooling, `bcrypt` + `pyjwt` for auth
 - **Database:** PostgreSQL
 - **Frontend:** React, TypeScript, Vite
 
@@ -44,7 +45,7 @@ psql servicd -f servicdDB.sql
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install fastapi uvicorn "psycopg[binary]" python-dotenv bcrypt pyjwt
+pip install fastapi uvicorn "psycopg[binary]" python-dotenv bcrypt pyjwt psycopg_pool
 ```
 
 Create a `backend/.env` file with your local database credentials and a JWT signing secret:
