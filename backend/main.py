@@ -1,4 +1,5 @@
 from fastapi import Depends, FastAPI
+import psycopg
 from pydantic import BaseModel
 import bcrypt
 from db import get_connection, secret_key
@@ -6,6 +7,8 @@ from fastapi import HTTPException, Security
 from fastapi.security import HTTPBearer
 import jwt
 from datetime import datetime, timedelta, timezone
+from psycopg import errors
+
 
 
 
@@ -24,6 +27,12 @@ class CarConfigCreate(BaseModel):
     make: str
     model: str
     engine: str | None = None  # Optional field for engine
+
+class CarCreate(BaseModel):
+    config_id: int
+    vin: str | None = None  # Optional field for VIN
+    total_miles: int | None = None  # Optional field for total miles
+
 
 
 
@@ -113,4 +122,20 @@ def create_car_config(car_config: CarConfigCreate, user_id: int = Depends(get_cu
     cur.close()
     conn_inst.close()
     return {"config_id": config_id, "year": car_config.year, "make": car_config.make, "model": car_config.model, "engine": engine_value}
+
+
+@app.post("/car")
+def create_car(car: CarCreate, user_id: int = Depends(get_current_user)):
+    with get_connection() as conn_inst:
+        with conn_inst.cursor() as cur:
+            try:
+                cur.execute("INSERT INTO car(user_id, config_id, vin, total_miles) VALUES (%s, %s, %s, %s) RETURNING car_id", (user_id, car.config_id, car.vin, car.total_miles))
+                row = cur.fetchone()
+                conn_inst.commit()
+            except psycopg.errors.ForeignKeyViolation:
+                raise HTTPException(status_code=404, detail="Invalid config_id: No such car configuration exists")
+            except psycopg.errors.UniqueViolation:
+                raise HTTPException(status_code=400, detail="Duplicate entry: A car with this VIN already exists")
+        
     
+    return {"car_id": row[0], "config_id": car.config_id, "vin": car.vin, "total_miles": car.total_miles}

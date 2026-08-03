@@ -57,7 +57,7 @@ get working code fast. When helping:
     candidate for a separate config module later), and exposes `get_connection()` which returns
     a **fresh** `psycopg.connect(...)` connection per call (deliberately not a single shared
     connection, and not yet a pool — see below). Verified working end-to-end.
-  - `main.py` — three working FastAPI endpoints, plus a reusable auth dependency:
+  - `main.py` — four working FastAPI endpoints, plus a reusable auth dependency:
     - `POST /users`: validates the request body via a Pydantic `UserCreate` model (`username`,
       `password`, optional `name`), hashes the password with `bcrypt.hashpw` (salt embedded
       automatically — see schema notes below), inserts via a parameterized query (`%s`
@@ -87,6 +87,16 @@ get working code fast. When helping:
       check-then-insert race condition two concurrent identical requests could otherwise hit).
       `engine` defaults to `"Unknown"` in the endpoint (not the Pydantic model) when omitted,
       so both "field left out" and "explicitly sent as `null`" are handled the same way.
+    - `POST /car`: the first endpoint where `Depends(get_current_user)`'s `user_id` is actually
+      *used* (not just gatekept) — `car.user_id` is always taken from the verified token, never
+      from client input, closing the vulnerability that motivated building auth in the first
+      place. Client supplies `config_id`/`vin`/`total_miles`. Uses `with get_connection() as
+      conn_inst: with conn_inst.cursor() as cur:` instead of manual `.close()` calls, guaranteeing
+      cleanup even if the `INSERT` raises — catches `psycopg.errors.ForeignKeyViolation` (bad
+      `config_id`) and `UniqueViolation` (duplicate VIN) and turns each into a specific
+      `404`/`400` instead of a raw `500`. Chose this over reusing the `car_config`-style
+      `ON CONFLICT` pattern deliberately: a duplicate VIN is a genuine error to report, not a
+      legitimate case to silently resolve like a repeated car_config combo was.
     - All verified working end-to-end via `uvicorn main:app --reload` + real requests; rows/
       tokens confirmed correct in `psql` and via local `jwt.decode()`.
 - `readme.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
@@ -237,10 +247,6 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
   same reasoning as DB credentials: anyone who obtains it could forge valid tokens for any user.
 
 ## Next Steps (not yet done)
-1. Build `POST /car` — the first endpoint where `Depends(get_current_user)`'s `user_id` actually
-   gets used (not just gatekept), since `car.user_id` must come from the token, never a
-   client-supplied value. Open design question in progress: which fields the client should
-   supply (`config_id`, `vin`, `total_miles`) vs. which the server fills in itself.
-2. Revisit `get_connection()` and learn/introduce `psycopg_pool` connection pooling as the
+1. Revisit `get_connection()` and learn/introduce `psycopg_pool` connection pooling as the
    production-grade pattern, now that endpoints work end-to-end.
-3. Trace a full user scenario through the schema alongside writing further insert logic.
+2. Trace a full user scenario through the schema alongside writing further insert logic.

@@ -22,6 +22,7 @@ Early development. Database schema is finalized and live. Backend API is in prog
   `Authorization: Bearer <token>` header)
 - `POST /car_config` — add a car configuration (year/make/model/engine), reusing an existing one
   if the same combination already exists
+- `POST /car` — register a car (config, VIN, mileage) to the logged-in user
 
 ## Getting Started
 
