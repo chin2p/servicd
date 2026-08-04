@@ -63,6 +63,7 @@ CREATE TABLE service_scheduled(
     maintenance_type_id INT REFERENCES maintenance_type(maintenance_type_id) NOT NULL,
     mileage_interval INT,
     months_interval INT,
+    UNIQUE (config_id, maintenance_type_id),
     CONSTRAINT valid_miles CHECK (
         mileage_interval IS NOT NULL OR months_interval IS NOT NULL
     )

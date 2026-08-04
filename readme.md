@@ -16,7 +16,8 @@ cross-platform.
 
 ## Project Status
 
-Early development. Database schema is finalized and live. Backend API is in progress:
+Early development. Database schema is finalized and live. All 8 tables have a working, tested
+`POST` endpoint — full write coverage, with ownership checks anywhere they matter:
 - `POST /users` — create a user, with bcrypt password hashing
 - `POST /login` — authenticate and receive a signed JWT (1-day expiration)
 - JWT-based auth dependency in place for protecting endpoints (extracts the current user from an
@@ -28,6 +29,12 @@ Early development. Database schema is finalized and live. Backend API is in prog
   one if it already exists
 - `POST /part` — add a part (name/brand/price), reusing an existing one if the same name+brand
   already exists
+- `POST /service` — log a service on one of your own cars (rejects other users' cars with `403`)
+- `POST /service_part` — attach a part to one of your own services
+- `POST /service_scheduled` — add a manufacturer maintenance rule (mileage/time interval) for a
+  car config
+
+No `GET` endpoints yet — nothing reads data back besides each `POST`'s own response.
 
 ## Getting Started
 

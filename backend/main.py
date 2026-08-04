@@ -6,8 +6,7 @@ from db import pool, secret_key
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPBearer
 import jwt
-from datetime import datetime, timedelta, timezone
-from psycopg import errors
+from datetime import datetime, date, timedelta, timezone
 
 
 
@@ -40,6 +39,24 @@ class PartCreate(BaseModel):
     name: str
     brand: str | None = None
     price_cents: int | None = None  # Optional field for price in cents
+
+class ServiceCreate(BaseModel):
+    car_id: int
+    maintenance_type_id: int
+    miles_at_service: int
+    date: date
+
+class ServicePartCreate(BaseModel):
+    service_id: int
+    part_id: int
+    price_at_service_cents: int | None = None  # Optional field for price at service in cents
+
+
+class ServiceScheduledCreate(BaseModel):
+    config_id: int
+    maintenance_type_id: int
+    mileage_interval: int | None = None  # Optional field for mileage interval
+    months_interval: int | None = None  # Optional field for months interval
 
 
 
@@ -203,3 +220,81 @@ def create_part(part: PartCreate, user_id: int = Depends(get_current_user)):
             conn.commit()
 
     return {"part_id": part_id, "name": part.name, "brand": part.brand, "price_cents": part.price_cents}
+
+
+@app.post("/service")
+def create_service(service: ServiceCreate, user_id: int = Depends(get_current_user)):
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+
+            cur.execute("SELECT user_id FROM car WHERE car_id = %s", (service.car_id,))
+            row = cur.fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Invalid car_id: No such car exists")
+            elif row[0] != user_id:
+                raise HTTPException(status_code=403, detail="Forbidden: You do not own this car")
+
+            try:
+                cur.execute("INSERT INTO service(car_id, maintenance_type_id, miles_at_service, date) VALUES (%s, %s, %s, %s) RETURNING service_id", (service.car_id, service.maintenance_type_id, service.miles_at_service, service.date))
+                row = cur.fetchone()
+                conn.commit()
+            except psycopg.errors.ForeignKeyViolation:
+                raise HTTPException(status_code=404, detail="Invalid maintenance_type_id: No such maintenance type exists")
+
+    return {"service_id": row[0], "car_id": service.car_id, "maintenance_type_id": service.maintenance_type_id, "miles_at_service": service.miles_at_service, "date": service.date}
+
+
+
+@app.post("/service_part")
+def create_service_part(service_part: ServicePartCreate, user_id: int = Depends(get_current_user)):
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+
+            # Check if the service exists and belongs to the user
+            cur.execute("SELECT car.user_id FROM service JOIN car ON service.car_id = car.car_id WHERE service.service_id = %s", (service_part.service_id,))
+            row = cur.fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Invalid service_id: No such service exists")
+            if row[0] != user_id:
+                raise HTTPException(status_code=403, detail="Forbidden: You do not own this service")
+            
+            
+            try:
+                cur.execute("INSERT INTO service_part(service_id, part_id, price_at_service_cents) VALUES (%s, %s, %s)", (service_part.service_id, service_part.part_id, service_part.price_at_service_cents))
+                
+                conn.commit()
+            except psycopg.errors.ForeignKeyViolation:
+                raise HTTPException(status_code=404, detail="Invalid part_id: No such part exists")
+            except psycopg.errors.UniqueViolation:
+                raise HTTPException(status_code=400, detail="Duplicate entry: This part is already associated with the service")
+
+    return {"service_id": service_part.service_id, "part_id": service_part.part_id, "price_at_service_cents": service_part.price_at_service_cents}
+
+
+@app.post("/service_scheduled")
+def create_service_scheduled(service_scheduled: ServiceScheduledCreate, user_id: int = Depends(get_current_user)):
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+
+            try:
+                cur.execute("INSERT INTO service_scheduled(config_id, maintenance_type_id, mileage_interval, months_interval) VALUES (%s, %s, %s, %s) ON CONFLICT (config_id, maintenance_type_id) DO NOTHING RETURNING schedule_id", (service_scheduled.config_id, service_scheduled.maintenance_type_id, service_scheduled.mileage_interval, service_scheduled.months_interval))
+                row = cur.fetchone()
+                if row is not None:
+                    schedule_id = row[0]
+                else:
+                    # If the row is None, it means the entry already exists, so we need to fetch the existing schedule_id
+                    cur.execute("SELECT schedule_id FROM service_scheduled WHERE config_id = %s AND maintenance_type_id = %s", (service_scheduled.config_id, service_scheduled.maintenance_type_id))
+                    existing_row = cur.fetchone()
+                    if existing_row is not None:
+                        schedule_id = existing_row[0]
+                    else:
+                        raise HTTPException(status_code=500, detail="Failed to retrieve or create scheduled service")
+                conn.commit()
+
+            except psycopg.errors.CheckViolation:
+                raise HTTPException(status_code=400, detail="At least one of mileage_interval or months_interval must be provided")
+            except psycopg.errors.ForeignKeyViolation:
+                raise HTTPException(status_code=404, detail="Invalid config_id or maintenance_type_id: No such car configuration or maintenance type exists")
+
+
+    return {"schedule_id": schedule_id, "config_id": service_scheduled.config_id, "maintenance_type_id": service_scheduled.maintenance_type_id, "mileage_interval": service_scheduled.mileage_interval, "months_interval": service_scheduled.months_interval}

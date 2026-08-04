@@ -63,7 +63,7 @@ get working code fast. When helping:
     Verified working end-to-end, including that the pool correctly recovers a connection after
     an aborted transaction (tested: a failed `POST /car` request immediately followed by a
     successful `POST /car_config` on the same pool, no issues).
-  - `main.py` — six working FastAPI endpoints, plus a reusable auth dependency:
+  - `main.py` — nine working FastAPI endpoints, plus a reusable auth dependency:
     - `POST /users`: validates the request body via a Pydantic `UserCreate` model (`username`,
       `password`, optional `name`), hashes the password with `bcrypt.hashpw` (salt embedded
       automatically — see schema notes below), inserts via a parameterized query (`%s`
@@ -109,11 +109,35 @@ get working code fast. When helping:
       `part.price_cents` stays `NULL` when omitted — deliberately *not* defaulted to `0`, since
       "unknown price" and "price is $0" are different facts and conflating them would corrupt
       future cost-per-mile/cost-breakdown calculations.
-    - All six endpoints use `with pool.connection() as conn: with conn.cursor() as cur:`
+    - `POST /service`: the first endpoint needing an **authorization** check, not just
+      authentication — `service` has no `user_id` of its own, only `car_id`, so
+      `Depends(get_current_user)` alone only proves *who's asking*, not *whether they own the
+      car they're referencing*. Fix: `SELECT user_id FROM car WHERE car_id = %s` before the
+      insert — `404` if the car doesn't exist, `403` (not `401` — the client *is* authenticated,
+      just not permitted) if it exists but belongs to someone else. Verified with a real
+      cross-user test (a second user correctly blocked from logging a service on the first
+      user's car). Also catches `ForeignKeyViolation` for a bad `maintenance_type_id`.
+    - `POST /service_part`: same ownership-check idea, one relationship further removed —
+      `service_part` only references `service_id`, so verifying ownership means tracing
+      `service_part → service → car → user` via a SQL `JOIN` (`SELECT car.user_id FROM service
+      JOIN car ON service.car_id = car.car_id WHERE service.service_id = %s`), first real use of
+      a JOIN in this codebase. No `RETURNING` on the `INSERT`, since `service_part`'s primary key
+      is the composite `(part_id, service_id)`, not a `SERIAL` column — there's no generated ID
+      to fetch back. Catches `ForeignKeyViolation` (bad `part_id`) and `UniqueViolation`
+      (duplicate part already logged on this service).
+    - `POST /service_scheduled`: same `ON CONFLICT DO NOTHING RETURNING` + fallback-`SELECT`
+      pattern as `car_config`/`maintenance_type`/`part`, on the `UNIQUE (config_id,
+      maintenance_type_id)` constraint. Also catches `psycopg.errors.CheckViolation` (client
+      submitted neither `mileage_interval` nor `months_interval`) — note `ON CONFLICT` only
+      suppresses `UNIQUE` violations, not `CHECK` violations, so both a `try`/`except` *and* the
+      `ON CONFLICT` clause were needed together. `user_id` unused (anti-abuse gate only, same
+      reasoning as the other catalog-table endpoints).
+    - All nine endpoints use `with pool.connection() as conn: with conn.cursor() as cur:`
       instead of manual `.close()` calls — guarantees the connection is returned to the pool
       (not leaked) even when an exception/`HTTPException` is raised inside the block.
-    - All verified working end-to-end via `uvicorn main:app --reload` + real requests; rows/
-      tokens confirmed correct in `psql` and via local `jwt.decode()`.
+    - All verified working end-to-end via `uvicorn main:app --reload` + real requests, including
+      multi-user cross-ownership tests; rows/tokens confirmed correct in `psql` and via local
+      `jwt.decode()`.
 - `readme.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
   sync when project state changes — this file is for my working context, `readme.md` is for
   humans/GitHub visitors.
@@ -184,6 +208,10 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
 - `maintenance_type_id` — INTEGER NOT NULL (FK → maintenance_type, no cascade — catalog table)
 - `mileage_interval` — INTEGER, nullable
 - `months_interval` — INTEGER, nullable
+- UNIQUE (`config_id`, `maintenance_type_id`) — one rule per maintenance type per car config; the
+  mileage-vs-time "whichever comes first" logic already lives inside a single row via the two
+  interval columns, so a repeat of this pair is a duplicate, not a second legitimate rule; added
+  after the table was already live but still empty, same as `car_config`'s UNIQUE
 - CHECK constraint requires at least one of `mileage_interval` / `months_interval` to be non-null
   (a rule needs at least one trigger — mileage-only, time-only, or both are all valid; both null
   is not)
@@ -267,6 +295,7 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
   same reasoning as DB credentials: anyone who obtains it could forge valid tokens for any user.
 
 ## Next Steps (not yet done)
-1. Build remaining endpoints (`service`, `service_part`, `service_scheduled`) to trace a full
-   real user scenario end-to-end (add a car → log a service → attach parts) before starting
-   frontend work.
+All 8 tables now have a working, tested `POST` endpoint — full schema coverage on writes,
+including authorization (not just authentication) checks everywhere ownership matters. Not yet
+decided: whether to build `GET` endpoints next (to actually retrieve/list data — nothing reads
+data back yet besides each `POST`'s own response) or start frontend work now against what exists.
