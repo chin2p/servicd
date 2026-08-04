@@ -24,6 +24,10 @@ Early development. Database schema is finalized and live. Backend API is in prog
 - `POST /car_config` — add a car configuration (year/make/model/engine), reusing an existing one
   if the same combination already exists
 - `POST /car` — register a car (config, VIN, mileage) to the logged-in user
+- `POST /maintenance_type` — add a maintenance category (e.g. "Oil Change"), reusing an existing
+  one if it already exists
+- `POST /part` — add a part (name/brand/price), reusing an existing one if the same name+brand
+  already exists
 
 ## Getting Started
 

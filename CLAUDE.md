@@ -63,7 +63,7 @@ get working code fast. When helping:
     Verified working end-to-end, including that the pool correctly recovers a connection after
     an aborted transaction (tested: a failed `POST /car` request immediately followed by a
     successful `POST /car_config` on the same pool, no issues).
-  - `main.py` — four working FastAPI endpoints, plus a reusable auth dependency:
+  - `main.py` — six working FastAPI endpoints, plus a reusable auth dependency:
     - `POST /users`: validates the request body via a Pydantic `UserCreate` model (`username`,
       `password`, optional `name`), hashes the password with `bcrypt.hashpw` (salt embedded
       automatically — see schema notes below), inserts via a parameterized query (`%s`
@@ -102,7 +102,14 @@ get working code fast. When helping:
       reusing the `car_config`-style `ON CONFLICT` pattern deliberately: a duplicate VIN is a
       genuine error to report, not a legitimate case to silently resolve like a repeated
       car_config combo was.
-    - All four endpoints use `with pool.connection() as conn: with conn.cursor() as cur:`
+    - `POST /maintenance_type` and `POST /part`: same `ON CONFLICT DO NOTHING RETURNING` +
+      fallback-`SELECT` "find or create" pattern as `car_config`, applied to their own `UNIQUE`
+      constraints (`maintenance_name` alone; `(part_name, brand)` composite). `part.brand`
+      defaults to `"Unknown"` when omitted (same convention as `car_config.engine`), and
+      `part.price_cents` stays `NULL` when omitted — deliberately *not* defaulted to `0`, since
+      "unknown price" and "price is $0" are different facts and conflating them would corrupt
+      future cost-per-mile/cost-breakdown calculations.
+    - All six endpoints use `with pool.connection() as conn: with conn.cursor() as cur:`
       instead of manual `.close()` calls — guarantees the connection is returned to the pool
       (not leaked) even when an exception/`HTTPException` is raised inside the block.
     - All verified working end-to-end via `uvicorn main:app --reload` + real requests; rows/
@@ -156,8 +163,9 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
 **part** (catalog of part types, reusable across services/cars)
 - `part_id` — SERIAL PRIMARY KEY
 - `part_name` — TEXT NOT NULL
-- `brand` — TEXT NOT NULL (use `'Generic'`/`'Unbranded'` when unknown, rather than NULL — avoids
-  NULL-uniqueness edge case on the composite UNIQUE below)
+- `brand` — TEXT NOT NULL (use `'Unknown'` when the client doesn't provide one, rather than
+  NULL — avoids NULL-uniqueness edge case on the composite UNIQUE below; same convention as
+  `car_config.engine`)
 - UNIQUE (`part_name`, `brand`) — same part name can exist across different brands
 - `price_cents` — INTEGER, nullable (money stored as integer cents to avoid float rounding errors;
   nullable since price may be unknown until an average-price lookup feature exists)
@@ -259,6 +267,6 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
   same reasoning as DB credentials: anyone who obtains it could forge valid tokens for any user.
 
 ## Next Steps (not yet done)
-1. Build remaining endpoints (`maintenance_type`, `service`, `part`, `service_part`,
-   `service_scheduled`) to trace a full real user scenario end-to-end (add a car → log a
-   service → attach parts) before starting frontend work.
+1. Build remaining endpoints (`service`, `service_part`, `service_scheduled`) to trace a full
+   real user scenario end-to-end (add a car → log a service → attach parts) before starting
+   frontend work.

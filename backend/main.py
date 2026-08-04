@@ -33,6 +33,14 @@ class CarCreate(BaseModel):
     vin: str | None = None  # Optional field for VIN
     total_miles: int | None = None  # Optional field for total miles
 
+class MaintenanceTypeCreate(BaseModel):
+    name: str
+
+class PartCreate(BaseModel):
+    name: str
+    brand: str | None = None
+    price_cents: int | None = None  # Optional field for price in cents
+
 
 
 
@@ -144,3 +152,54 @@ def create_car(car: CarCreate, user_id: int = Depends(get_current_user)):
         
     
     return {"car_id": row[0], "config_id": car.config_id, "vin": car.vin, "total_miles": car.total_miles}
+
+
+@app.post("/maintenance_type")
+def create_maintenance_type(maintenance_type: MaintenanceTypeCreate, user_id: int = Depends(get_current_user)):
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+    
+            cur.execute("INSERT INTO maintenance_type(maintenance_name) VALUES (%s) ON CONFLICT (maintenance_name) DO NOTHING RETURNING maintenance_type_id", (maintenance_type.name,))
+            row = cur.fetchone()
+            if row is not None:
+                maintenance_type_id = row[0]
+            else:
+                # If the row is None, it means the entry already exists, so we need to fetch the existing maintenance_type_id
+                cur.execute("SELECT maintenance_type_id FROM maintenance_type WHERE maintenance_name = %s", (maintenance_type.name,))
+                existing_row = cur.fetchone()
+                if existing_row is not None:
+                    maintenance_type_id = existing_row[0]
+                else:
+                    raise HTTPException(status_code=500, detail="Failed to retrieve or create maintenance type")
+
+            conn.commit()
+
+
+    return {"maintenance_type_id": maintenance_type_id, "name": maintenance_type.name}
+
+
+@app.post("/part")
+def create_part(part: PartCreate, user_id: int = Depends(get_current_user)):
+
+    if part.brand is None:
+        part.brand = "Unknown"  # Default value if brand is not provided
+
+
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO part(part_name, brand, price_cents) VALUES (%s, %s, %s) ON CONFLICT (part_name, brand) DO NOTHING RETURNING part_id", (part.name, part.brand, part.price_cents))
+            row = cur.fetchone()
+            if row is not None:
+                part_id = row[0]
+            else:
+                # If the row is None, it means the entry already exists, so we need to fetch the existing part_id
+                cur.execute("SELECT part_id FROM part WHERE part_name = %s AND brand = %s", (part.name, part.brand))
+                existing_row = cur.fetchone()
+                if existing_row is not None:
+                    part_id = existing_row[0]
+                else:
+                    raise HTTPException(status_code=500, detail="Failed to retrieve or create part")
+            conn.commit()
+
+    return {"part_id": part_id, "name": part.name, "brand": part.brand, "price_cents": part.price_cents}
