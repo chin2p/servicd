@@ -17,7 +17,8 @@ cross-platform.
 ## Project Status
 
 Early development. Database schema is finalized and live. All 8 tables have a working, tested
-`POST` endpoint — full write coverage, with ownership checks anywhere they matter:
+`POST` endpoint, plus core `GET` endpoints for reading data back — full read+write coverage,
+with ownership checks anywhere they matter:
 - `POST /users` — create a user, with bcrypt password hashing
 - `POST /login` — authenticate and receive a signed JWT (1-day expiration)
 - JWT-based auth dependency in place for protecting endpoints (extracts the current user from an
@@ -33,8 +34,11 @@ Early development. Database schema is finalized and live. All 8 tables have a wo
 - `POST /service_part` — attach a part to one of your own services
 - `POST /service_scheduled` — add a manufacturer maintenance rule (mileage/time interval) for a
   car config
-
-No `GET` endpoints yet — nothing reads data back besides each `POST`'s own response.
+- `GET /cars` — list the logged-in user's cars
+- `GET /cars/{car_id}` — view one car (must belong to the logged-in user)
+- `GET /cars/{car_id}/services` — service history for one car (must belong to the logged-in user)
+- `GET /maintenance_types` — browse the maintenance-type catalog (public, no auth needed)
+- `GET /parts` — browse the parts catalog (public, no auth needed)
 
 ## Getting Started
 

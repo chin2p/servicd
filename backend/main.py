@@ -298,3 +298,110 @@ def create_service_scheduled(service_scheduled: ServiceScheduledCreate, user_id:
 
 
     return {"schedule_id": schedule_id, "config_id": service_scheduled.config_id, "maintenance_type_id": service_scheduled.maintenance_type_id, "mileage_interval": service_scheduled.mileage_interval, "months_interval": service_scheduled.months_interval}
+
+
+
+#Get end points
+@app.get("/cars")
+def get_cars(user_id: int = Depends(get_current_user)):
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT car.car_id, car.vin, car.total_miles, car_config.year, car_config.make, car_config.model, car_config.engine FROM car JOIN car_config ON car.config_id = car_config.config_id WHERE car.user_id = %s", (user_id,))
+            rows = cur.fetchall()
+        cars = []
+        for row in rows:
+            cars.append({
+                "car_id": row[0],
+                "vin": row[1],
+                "total_miles": row[2],
+                "year": row[3],
+                "make": row[4],
+                "model": row[5],
+                "engine": row[6]
+            })
+
+    return {"cars": cars}
+
+
+@app.get("/cars/{car_id}")
+def get_car(car_id: int, user_id: int = Depends(get_current_user)):
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT car.car_id, car.user_id, car.vin, car.total_miles, car_config.year, car_config.make, car_config.model, car_config.engine FROM car JOIN car_config ON car.config_id = car_config.config_id WHERE car.car_id = %s", (car_id,))
+            row = cur.fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Car not found")
+            if row[1] != user_id:
+                raise HTTPException(status_code=403, detail="Forbidden: You do not own this car")
+
+    return {
+        "car_id": row[0],
+        "vin": row[2],
+        "total_miles": row[3],
+        "year": row[4],
+        "make": row[5],
+        "model": row[6],
+        "engine": row[7]
+    }
+
+@app.get("/cars/{car_id}/services")
+def get_car_services(car_id: int, user_id: int = Depends(get_current_user)):
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            # Check if the car exists and belongs to the user
+            cur.execute("SELECT user_id FROM car WHERE car_id = %s", (car_id,))
+            row = cur.fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Invalid car_id: No such car exists")
+            if row[0] != user_id:
+                raise HTTPException(status_code=403, detail="Forbidden: You do not own this car")
+
+            # Fetch services for the car
+            cur.execute("SELECT service.service_id, service.maintenance_type_id, maintenance_type.maintenance_name, service.miles_at_service, service.date FROM service JOIN maintenance_type ON service.maintenance_type_id = maintenance_type.maintenance_type_id WHERE service.car_id = %s", (car_id,))
+            services = []
+            for service_row in cur.fetchall():
+                services.append({
+                    "service_id": service_row[0],
+                    "maintenance_type_id": service_row[1],
+                    "maintenance_name": service_row[2],
+                    "miles_at_service": service_row[3],
+                    "date": service_row[4]
+                })
+
+
+    return {"services": services}
+
+
+@app.get("/maintenance_types")
+def get_maintenance_types():
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT maintenance_type_id, maintenance_name FROM maintenance_type")
+            rows = cur.fetchall()
+        maintenance_types = []
+        for row in rows:
+            maintenance_types.append({
+                "maintenance_type_id": row[0],
+                "name": row[1]
+            })
+
+    return {"maintenance_types": maintenance_types}
+
+
+@app.get("/parts")
+def get_parts():
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT part_id, part_name, brand, price_cents FROM part")
+            rows = cur.fetchall()
+        parts = []
+        for row in rows:
+            parts.append({
+                "part_id": row[0],
+                "name": row[1],
+                "brand": row[2],
+                "price_cents": row[3]
+            })
+
+    return {"parts": parts}
+

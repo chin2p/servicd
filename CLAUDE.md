@@ -63,7 +63,7 @@ get working code fast. When helping:
     Verified working end-to-end, including that the pool correctly recovers a connection after
     an aborted transaction (tested: a failed `POST /car` request immediately followed by a
     successful `POST /car_config` on the same pool, no issues).
-  - `main.py` — nine working FastAPI endpoints, plus a reusable auth dependency:
+  - `main.py` — fourteen working FastAPI endpoints, plus a reusable auth dependency:
     - `POST /users`: validates the request body via a Pydantic `UserCreate` model (`username`,
       `password`, optional `name`), hashes the password with `bcrypt.hashpw` (salt embedded
       automatically — see schema notes below), inserts via a parameterized query (`%s`
@@ -132,7 +132,25 @@ get working code fast. When helping:
       suppresses `UNIQUE` violations, not `CHECK` violations, so both a `try`/`except` *and* the
       `ON CONFLICT` clause were needed together. `user_id` unused (anti-abuse gate only, same
       reasoning as the other catalog-table endpoints).
-    - All nine endpoints use `with pool.connection() as conn: with conn.cursor() as cur:`
+    - `GET /cars`: first endpoint using `cur.fetchall()` instead of `fetchone()` (a user can own
+      multiple cars) and the first read-side use of `Depends(get_current_user)` — here the token
+      isn't just an ownership *check*, it's the actual filter (`WHERE car.user_id = %s`) scoping
+      the whole query. Joins in `car_config` columns (year/make/model/engine) so the frontend
+      doesn't need a second request per car just to know what it is.
+    - `GET /cars/{car_id}`: first use of a path parameter (`{car_id}` in the route, `car_id: int`
+      as a function param — FastAPI extracts and type-validates it automatically, `422` if it's
+      not a valid int). Same `404`/`403` ownership-check pattern as the `POST` write endpoints,
+      applied to a read this time.
+    - `GET /cars/{car_id}/services`: combines the `/cars/{car_id}` ownership check with a joined
+      `fetchall()` (`service` joined to `maintenance_type`, so the response has a readable
+      `maintenance_name`, not just an ID) — the car's service history.
+    - `GET /maintenance_types` and `GET /parts`: plain catalog listings, deliberately made
+      **public** (no `Depends(get_current_user)`) — unlike the `POST` versions, a `GET` here
+      doesn't need an anti-abuse gate since reading isn't an abuse vector the way writing is;
+      being public also lets a frontend populate dropdowns before a user is logged in, and makes
+      the response cacheable (identical for every caller, unlike a per-user authenticated
+      response).
+    - All fourteen endpoints use `with pool.connection() as conn: with conn.cursor() as cur:`
       instead of manual `.close()` calls — guarantees the connection is returned to the pool
       (not leaked) even when an exception/`HTTPException` is raised inside the block.
     - All verified working end-to-end via `uvicorn main:app --reload` + real requests, including
@@ -295,7 +313,7 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
   same reasoning as DB credentials: anyone who obtains it could forge valid tokens for any user.
 
 ## Next Steps (not yet done)
-All 8 tables now have a working, tested `POST` endpoint — full schema coverage on writes,
-including authorization (not just authentication) checks everywhere ownership matters. Not yet
-decided: whether to build `GET` endpoints next (to actually retrieve/list data — nothing reads
-data back yet besides each `POST`'s own response) or start frontend work now against what exists.
+All 8 tables have a working, tested `POST` endpoint, plus 5 `GET` endpoints covering the core
+read scenarios (list/view cars, view service history, browse catalogs) — full read+write
+coverage with authorization checks everywhere ownership matters. Next: start frontend work
+against this backend.
