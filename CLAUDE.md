@@ -153,9 +153,34 @@ get working code fast. When helping:
     - All fourteen endpoints use `with pool.connection() as conn: with conn.cursor() as cur:`
       instead of manual `.close()` calls — guarantees the connection is returned to the pool
       (not leaked) even when an exception/`HTTPException` is raised inside the block.
+    - `CORSMiddleware` added, `allow_origins` scoped specifically to `http://localhost:5173`
+      (the Vite dev server) — needed once frontend work started, since the browser blocks
+      cross-origin requests by default (different port = different origin). Will need updating
+      once deployed somewhere real.
     - All verified working end-to-end via `uvicorn main:app --reload` + real requests, including
       multi-user cross-ownership tests; rows/tokens confirmed correct in `psql` and via local
       `jwt.decode()`.
+- `frontend/` (React + TypeScript via Vite) — moved past the bare scaffold, now containing:
+  - `react-router-dom` installed for client-side routing; `main.tsx` wraps the app in
+    `BrowserRouter`, `App.tsx` defines `<Routes>`/`<Route>` mappings.
+  - `src/api.ts` — a shared `apiFetch()` wrapper every page calls instead of raw `fetch`:
+    prepends the backend base URL, auto-attaches `Authorization: Bearer <token>` from
+    `localStorage` when a token exists, and throws a real `Error` (reading the backend's
+    `detail` field) on any non-`2xx` response, so callers get one consistent `try`/`catch`
+    pattern instead of repeating error handling everywhere.
+  - `src/pages/SignupPage.tsx` (`/signup`) and `src/pages/LoginPage.tsx` (`/login`) — both
+    working end-to-end: controlled form inputs via `useState`, submit via `apiFetch`, errors
+    displayed inline. `LoginPage` saves the returned JWT to `localStorage` on success and
+    navigates to `/cars` (not yet built). Verified for real: a signup created an actual row in
+    `users` (confirmed via `psql`), and a login stored a real token (confirmed via browser
+    DevTools → Application → Local Storage).
+  - Both pages required real debugging of fundamental React/TypeScript syntax the user was new
+    to — class vs. function components (hooks only work in function components), `useState`
+    destructuring syntax, `async`/`await` placement, `FormEvent<HTMLFormElement>` typing
+    (`React.FormEvent` namespace access is deprecated in current `@types/react`, use a named
+    `import type { FormEvent }` instead), `unknown` typing on `catch` blocks needing a type
+    assertion (`err as Error`) before accessing `.message`, and remembering `export default` —
+    all now understood and correctly applied in both files.
 - `readme.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
   sync when project state changes — this file is for my working context, `readme.md` is for
   humans/GitHub visitors.
@@ -311,9 +336,17 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
   deferred for now (same "simple first, refine later" reasoning as connection pooling).
 - **Signing secret lives in `.env`** (`SECRET_KEY`), generated via `secrets.token_hex(32)` —
   same reasoning as DB credentials: anyone who obtains it could forge valid tokens for any user.
+- **Frontend stores the JWT in `localStorage`**, chosen deliberately over the more XSS-resistant
+  hybrid pattern (short-lived access token in memory only + longer-lived refresh token in an
+  `httpOnly` cookie), since that hybrid needs the refresh-token backend infrastructure already
+  deferred above. `localStorage` is the common real-world SPA choice, not the most secure one —
+  user has explicitly signed off on this tradeoff and wants the hybrid kept as a known upgrade
+  path once refresh tokens are built, not dismissed.
 
 ## Next Steps (not yet done)
-All 8 tables have a working, tested `POST` endpoint, plus 5 `GET` endpoints covering the core
-read scenarios (list/view cars, view service history, browse catalogs) — full read+write
-coverage with authorization checks everywhere ownership matters. Next: start frontend work
-against this backend.
+Backend: all 8 tables have a working, tested `POST` endpoint, plus 5 `GET` endpoints — full
+read+write coverage with authorization checks everywhere ownership matters.
+
+Frontend: signup and login are done and verified end-to-end. Next: build the `/cars` dashboard
+page (calls `GET /cars`, the first page to render real data behind auth), then a car detail page
+(`GET /cars/{car_id}`, `GET /cars/{car_id}/services`).

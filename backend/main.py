@@ -5,6 +5,7 @@ import bcrypt
 from db import pool, secret_key
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPBearer
+from fastapi.middleware.cors import CORSMiddleware
 import jwt
 from datetime import datetime, date, timedelta, timezone
 
@@ -79,6 +80,15 @@ def get_current_user(credentials = Security(security)):
     
     
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 dummy_hash = bcrypt.hashpw(b"dummy_password", bcrypt.gensalt())
 
 
