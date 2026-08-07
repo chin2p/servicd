@@ -45,6 +45,7 @@ function CarsDashboard() {
         return (
             <div>
                 <h1>Cars Dashboard</h1>
+                <Link to="/cars/new">Add New Car</Link>
                 <ul>
                     {cars.map((car) => (
                         <li key={car.car_id}>

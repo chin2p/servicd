@@ -204,6 +204,22 @@ get working code fast. When helping:
     null-check on `car` itself narrows its type. Verified end-to-end against both a car with
     logged services and one with none (confirmed the empty-service-history case renders
     correctly, not as a bug).
+  - `src/pages/AddCarPage.tsx` (`/cars/new`) — two-step form in a single component, using a
+    `step` state variable (`1`/`2`) with plain `if (step === 1) return (...)` early-return logic
+    to switch between forms, rather than two separate routes — matches the two-call backend flow
+    (`POST /car_config` then `POST /car`, `config_id` from the first carried in state into the
+    second). Linked from `CarsDashboard` via `<Link to="/cars/new">`. Two real bugs caught in
+    review: wrong endpoint paths (initially called `/cars/config` and `/car_config` for the two
+    steps, instead of `/car_config` then `/car`), and `HTMLFormEvent` (not a real type) instead
+    of `HTMLFormElement` in both handlers' `FormEvent<...>` typing. Deliberately sends `vin:
+    undefined` (not `""`) when the field is left blank — the `car` table's VIN `CHECK` constraint
+    accepts `NULL` or a valid 17-char VIN, not an empty string, and `/car` doesn't catch
+    `CheckViolation`, so a raw empty string would have surfaced as an unhandled `500`. Error
+    display deliberately kept *inline within each form* (`{error && <p>{error}</p>}`, same as
+    `SignupPage`/`LoginPage`) rather than a full early-return replacing the page — unlike
+    `CarsDashboard`/`CarDetailPage` (read-only, an error is a dead end), a failed submission here
+    needs the form to stay visible so the user can fix their input and retry. Verified end-to-end:
+    full two-step submission lands a new car on `/cars`.
 - `readme.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
   sync when project state changes — this file is for my working context, `readme.md` is for
   humans/GitHub visitors.
@@ -370,7 +386,7 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
 Backend: all 8 tables have a working, tested `POST` endpoint, plus 5 `GET` endpoints — full
 read+write coverage with authorization checks everywhere ownership matters.
 
-Frontend: signup, login, the `/cars` dashboard, and the car detail page are all done and verified
-end-to-end, including navigation between them via `<Link>`. Next: not yet decided — candidates
-are forms for adding a car/logging a service from the UI (currently only creatable via the
-backend directly), or continuing to round out more of the backend/frontend loop first.
+Frontend: signup, login, the `/cars` dashboard, the car detail page, and adding a car
+(`/cars/new`, two-step form) are all done and verified end-to-end. Decided approach: keep
+building out write-side forms before any visual polish pass. Next: a "log a service" form
+(`POST /service`, likely also needing `POST /service_part` for attaching parts), then polish.
