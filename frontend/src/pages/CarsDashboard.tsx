@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import apiFetch from "../api";
+import { Link } from "react-router-dom";
 
-type Car = {
+
+export type Car = {
     car_id: number;
     vin: string;
     total_miles: number | null;
@@ -46,7 +48,9 @@ function CarsDashboard() {
                 <ul>
                     {cars.map((car) => (
                         <li key={car.car_id}>
-                            {car.year} {car.make} {car.model}
+                            <Link to={`/cars/${car.car_id}`}>
+                                {car.year} {car.make} {car.model}
+                            </Link>
                         </li>
                     ))}
                 </ul>

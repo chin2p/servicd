@@ -190,7 +190,20 @@ get working code fast. When helping:
     a `type Car = {...}` matching the `GET /cars` response shape for type safety in the
     `.map()` render, with each list item keyed by `car_id`. Verified working end-to-end,
     including the error path (deleted the token from `localStorage`, confirmed a `401` correctly
-    renders the error message instead of a car list).
+    renders the error message instead of a car list). Each list item is wrapped in a
+    react-router-dom `<Link to={"/cars/" + car_id}>` (not a plain `<a>`, which would force a full
+    page reload/reset all React state) linking to that car's detail page; `Car` type exported so
+    `CarDetailPage` can reuse it.
+  - `src/pages/CarDetailPage.tsx` (`/cars/:carId`) — first use of a dynamic route param
+    (`useParams<{ carId: string }>()`); the `useEffect` dependency array is `[carId]` rather than
+    `[]`, since the component wouldn't remount (and thus wouldn't refetch) if navigating directly
+    from one car's detail page to another. Makes two sequential `apiFetch` calls in one effect
+    (car details, then service history). Required an explicit `if (!car) return ...;` guard
+    before rendering — TypeScript can't infer `car` is non-null just from the `loading`/`error`
+    early returns above it, since those are separate, unrelated state variables; only a direct
+    null-check on `car` itself narrows its type. Verified end-to-end against both a car with
+    logged services and one with none (confirmed the empty-service-history case renders
+    correctly, not as a bug).
 - `readme.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
   sync when project state changes — this file is for my working context, `readme.md` is for
   humans/GitHub visitors.
@@ -357,5 +370,7 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
 Backend: all 8 tables have a working, tested `POST` endpoint, plus 5 `GET` endpoints — full
 read+write coverage with authorization checks everywhere ownership matters.
 
-Frontend: signup, login, and the `/cars` dashboard are done and verified end-to-end. Next: a car
-detail page (`GET /cars/{car_id}`, `GET /cars/{car_id}/services`).
+Frontend: signup, login, the `/cars` dashboard, and the car detail page are all done and verified
+end-to-end, including navigation between them via `<Link>`. Next: not yet decided — candidates
+are forms for adding a car/logging a service from the UI (currently only creatable via the
+backend directly), or continuing to round out more of the backend/frontend loop first.
