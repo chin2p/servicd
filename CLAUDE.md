@@ -171,16 +171,26 @@ get working code fast. When helping:
   - `src/pages/SignupPage.tsx` (`/signup`) and `src/pages/LoginPage.tsx` (`/login`) — both
     working end-to-end: controlled form inputs via `useState`, submit via `apiFetch`, errors
     displayed inline. `LoginPage` saves the returned JWT to `localStorage` on success and
-    navigates to `/cars` (not yet built). Verified for real: a signup created an actual row in
-    `users` (confirmed via `psql`), and a login stored a real token (confirmed via browser
-    DevTools → Application → Local Storage).
+    navigates to `/cars`. Verified for real: a signup created an actual row in `users` (confirmed
+    via `psql`), and a login stored a real token (confirmed via browser DevTools → Application →
+    Local Storage).
   - Both pages required real debugging of fundamental React/TypeScript syntax the user was new
     to — class vs. function components (hooks only work in function components), `useState`
     destructuring syntax, `async`/`await` placement, `FormEvent<HTMLFormElement>` typing
     (`React.FormEvent` namespace access is deprecated in current `@types/react`, use a named
     `import type { FormEvent }` instead), `unknown` typing on `catch` blocks needing a type
     assertion (`err as Error`) before accessing `.message`, and remembering `export default` —
-    all now understood and correctly applied in both files.
+    all now understood and correctly applied.
+  - `src/pages/CarsDashboard.tsx` (`/cars`) — first page that fetches data on load rather than
+    on form submit, using `useEffect` with an empty dependency array (`[]`, runs once on mount);
+    the async fetch logic lives in a separate function defined *inside* the effect and called
+    immediately after (an effect callback can't be `async` itself). Three pieces of state
+    (`cars`, `loading`, `error`) drive an "early return" pattern — render a loading message,
+    then an error message, then only fall through to the actual list if neither applies. Defines
+    a `type Car = {...}` matching the `GET /cars` response shape for type safety in the
+    `.map()` render, with each list item keyed by `car_id`. Verified working end-to-end,
+    including the error path (deleted the token from `localStorage`, confirmed a `401` correctly
+    renders the error message instead of a car list).
 - `readme.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
   sync when project state changes — this file is for my working context, `readme.md` is for
   humans/GitHub visitors.
@@ -347,6 +357,5 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
 Backend: all 8 tables have a working, tested `POST` endpoint, plus 5 `GET` endpoints — full
 read+write coverage with authorization checks everywhere ownership matters.
 
-Frontend: signup and login are done and verified end-to-end. Next: build the `/cars` dashboard
-page (calls `GET /cars`, the first page to render real data behind auth), then a car detail page
-(`GET /cars/{car_id}`, `GET /cars/{car_id}/services`).
+Frontend: signup, login, and the `/cars` dashboard are done and verified end-to-end. Next: a car
+detail page (`GET /cars/{car_id}`, `GET /cars/{car_id}/services`).

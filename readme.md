@@ -40,8 +40,8 @@ with ownership checks anywhere they matter:
 - `GET /maintenance_types` — browse the maintenance-type catalog (public, no auth needed)
 - `GET /parts` — browse the parts catalog (public, no auth needed)
 
-Frontend has signup and login working end-to-end (`/signup`, `/login`), with the JWT stored in
-`localStorage` after login. Dashboard/car pages not built yet.
+Frontend has signup, login, and a cars dashboard working end-to-end (`/signup`, `/login`,
+`/cars`), with the JWT stored in `localStorage` after login. Car detail page not built yet.
 
 ## Getting Started
 
