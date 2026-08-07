@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import apiFetch from '../api';
 import type { Car } from './CarsDashboard';
@@ -58,6 +58,7 @@ function CarDetailPage() {
             <h1>{car.year} {car.make} {car.model}</h1>
             <p>VIN: {car.vin}</p>
             <p>Total Miles: {car.total_miles}</p>
+            <Link to={`/cars/${carId}/services/new`}>Log Service</Link>
             <h2>Service History</h2>
             <ul>
                 {services.map((service) => (

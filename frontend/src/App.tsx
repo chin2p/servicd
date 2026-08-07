@@ -4,6 +4,7 @@ import LoginPage from './pages/LoginPage.tsx'
 import CarsDashboard from './pages/CarsDashboard.tsx'
 import CarDetailPage from './pages/CarDetailPage.tsx'
 import AddCarPage from './pages/AddCarPage.tsx'
+import LogServicePage from './pages/LogServicePage.tsx'
 
 
 
@@ -15,6 +16,8 @@ function App() {
       <Route path="/cars" element={<CarsDashboard />} />
       <Route path="/cars/:carId" element={<CarDetailPage />} />
       <Route path="/cars/new" element={<AddCarPage />} />
+      <Route path="/cars/:carId/services/new" element={<LogServicePage />} />
+      
     </Routes>
   )
 }

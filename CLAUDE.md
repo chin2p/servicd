@@ -220,6 +220,19 @@ get working code fast. When helping:
     `CarsDashboard`/`CarDetailPage` (read-only, an error is a dead end), a failed submission here
     needs the form to stay visible so the user can fix their input and retry. Verified end-to-end:
     full two-step submission lands a new car on `/cars`.
+  - `src/pages/LogServicePage.tsx` (`/cars/:carId/services/new`) — first form using a `<select>`
+    populated from a fetched catalog (`GET /maintenance_types` on mount, same `useEffect` pattern
+    as `CarsDashboard`, rendered as `<option>`s via `.map()`) instead of a raw ID input, so the
+    user picks a real maintenance type rather than guessing an ID. `<input type="date">` needed
+    no conversion — its `"YYYY-MM-DD"` value already matches what the backend's `date` field
+    expects, unlike `miles_at_service` (still needs `Number(...)`, same reasoning as `year`
+    elsewhere). Two real bugs caught in review: `error` state was being set but never rendered
+    anywhere in the JSX (user caught this one themselves before asking), and
+    `navigate("/cars/$(carID)")` — not inside backticks so `$(carID)` was a literal string, not
+    interpolation, plus `carID` didn't match the actual variable `carId` (case-sensitive). Fixed
+    to `` navigate(`/cars/${carId}`) ``. Linked from `CarDetailPage` via `<Link to={\`/cars/${carId}/services/new\`}>`.
+    Verified end-to-end: submitting lands back on the car's detail page with the new service
+    showing in its history.
 - `readme.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
   sync when project state changes — this file is for my working context, `readme.md` is for
   humans/GitHub visitors.
@@ -386,7 +399,8 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
 Backend: all 8 tables have a working, tested `POST` endpoint, plus 5 `GET` endpoints — full
 read+write coverage with authorization checks everywhere ownership matters.
 
-Frontend: signup, login, the `/cars` dashboard, the car detail page, and adding a car
-(`/cars/new`, two-step form) are all done and verified end-to-end. Decided approach: keep
-building out write-side forms before any visual polish pass. Next: a "log a service" form
-(`POST /service`, likely also needing `POST /service_part` for attaching parts), then polish.
+Frontend: signup, login, the `/cars` dashboard, the car detail page, adding a car (`/cars/new`),
+and logging a service (`/cars/:carId/services/new`) are all done and verified end-to-end.
+Decided approach: keep building out write-side forms before any visual polish pass. Next: not
+yet decided — candidates are attaching parts to a service (`POST /service_part`), or a form for
+`part`/`service_scheduled`, or starting the polish pass now that the core write flows all work.
