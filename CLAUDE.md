@@ -143,7 +143,17 @@ get working code fast. When helping:
       applied to a read this time.
     - `GET /cars/{car_id}/services`: combines the `/cars/{car_id}` ownership check with a joined
       `fetchall()` (`service` joined to `maintenance_type`, so the response has a readable
-      `maintenance_name`, not just an ID) — the car's service history.
+      `maintenance_name`, not just an ID) — the car's service history. Later extended to also
+      `LEFT JOIN service_part`/`part` (specifically `LEFT`, not a regular `JOIN` — a service with
+      zero parts attached must still appear in results, not be silently dropped) and return each
+      service's `parts` as a nested list. Since SQL rows are flat, one row comes back per
+      (service, part) pair — a service with 2 parts repeats twice, with its own columns
+      duplicated each time — so the endpoint groups the flat rows into nested dicts in Python
+      afterward (a dict keyed by `service_id`, appending a part entry only when that row's
+      `part_id` isn't `NULL`, which is what a `LEFT JOIN` non-match looks like). Built to close a
+      real gap the user noticed: after building `POST /service_part`, nothing surfaced attached
+      parts anywhere in a response — this was the first backend change made specifically because
+      a frontend page needed to display something the API didn't yet expose.
     - `GET /maintenance_types` and `GET /parts`: plain catalog listings, deliberately made
       **public** (no `Depends(get_current_user)`) — unlike the `POST` versions, a `GET` here
       doesn't need an anti-abuse gate since reading isn't an abuse vector the way writing is;
@@ -203,7 +213,15 @@ get working code fast. When helping:
     early returns above it, since those are separate, unrelated state variables; only a direct
     null-check on `car` itself narrows its type. Verified end-to-end against both a car with
     logged services and one with none (confirmed the empty-service-history case renders
-    correctly, not as a bug).
+    correctly, not as a bug). Each service's `parts` array is rendered as a nested `<ul>` inside
+    that service's `<li>` — first nested-list rendering in the app (a `.map()` inside a `.map()`,
+    each level still needing its own `key`). Price display converts stored cents to dollars only
+    at render time (`(cents / 100).toFixed(2)`, never touching the stored integer) using an
+    explicit `!== null` check rather than a truthy check — a plain truthy check would have
+    incorrectly hidden a genuinely free ($0.00) part, same "unknown price ≠ $0 price" principle
+    enforced everywhere else in this project. One structural bug caught in review: the inner
+    `.map()`'s `<li>` elements were initially direct children of the outer service `<li>` with no
+    wrapping `<ul>` — same category of invalid-list-nesting mistake as `CarsDashboard` earlier.
   - `src/pages/AddCarPage.tsx` (`/cars/new`) — two-step form in a single component, using a
     `step` state variable (`1`/`2`) with plain `if (step === 1) return (...)` early-return logic
     to switch between forms, rather than two separate routes — matches the two-call backend flow
@@ -430,10 +448,11 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
 Backend: all 8 tables have a working, tested `POST` endpoint, plus 5 `GET` endpoints — full
 read+write coverage with authorization checks everywhere ownership matters.
 
-Frontend: signup, login, the `/cars` dashboard, the car detail page, adding a car (`/cars/new`),
-logging a service (`/cars/:carId/services/new`), and attaching a part to a service
-(`/cars/:carId/services/:serviceId/parts/new`) are all done and verified end-to-end. Known gap,
-next up: attached parts aren't visible anywhere in the UI yet — `GET /cars/{car_id}/services`
-doesn't return parts data at all, so `CarDetailPage`'s service history can't display them.
-Needs a backend change (extend that endpoint, or add a new one, to include each service's
-attached parts) before the frontend display work can happen.
+Frontend: signup, login, the `/cars` dashboard, the car detail page (now including each
+service's attached parts, nested under it, with prices), adding a car (`/cars/new`), logging a
+service (`/cars/:carId/services/new`), and attaching a part to a service
+(`/cars/:carId/services/:serviceId/parts/new`) are all done and verified end-to-end. Next: not
+yet decided — the core write+read loop is now fully closed (nothing built that isn't also
+visible somewhere in the UI), so remaining candidates are a form for `service_scheduled`
+(maintenance recommendations — the app's core differentiating feature per Project Overview,
+not yet touched at all on the frontend), or starting a visual polish pass.

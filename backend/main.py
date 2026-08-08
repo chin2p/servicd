@@ -367,18 +367,37 @@ def get_car_services(car_id: int, user_id: int = Depends(get_current_user)):
                 raise HTTPException(status_code=403, detail="Forbidden: You do not own this car")
 
             # Fetch services for the car
-            cur.execute("SELECT service.service_id, service.maintenance_type_id, maintenance_type.maintenance_name, service.miles_at_service, service.date FROM service JOIN maintenance_type ON service.maintenance_type_id = maintenance_type.maintenance_type_id WHERE service.car_id = %s", (car_id,))
-            services = []
-            for service_row in cur.fetchall():
-                services.append({
-                    "service_id": service_row[0],
-                    "maintenance_type_id": service_row[1],
-                    "maintenance_name": service_row[2],
-                    "miles_at_service": service_row[3],
-                    "date": service_row[4]
-                })
+            cur.execute("""SELECT service.service_id, service.maintenance_type_id, maintenance_type.maintenance_name,
+                                service.miles_at_service, service.date,
+                                part.part_id, part.part_name, part.brand, service_part.price_at_service_cents
+                            FROM service
+                            JOIN maintenance_type ON service.maintenance_type_id = maintenance_type.maintenance_type_id
+                            LEFT JOIN service_part ON service.service_id = service_part.service_id
+                            LEFT JOIN part ON service_part.part_id = part.part_id
+                            WHERE service.car_id = %s
+                        """, (car_id,))
+            rows = cur.fetchall()
 
-
+            services_by_id = {}
+            for row in rows:
+                (service_id, maintenance_type_id, maintenance_name, miles_at_service, date, part_id, part_name, brand, price_at_service_cents) = row
+                if service_id not in services_by_id:
+                    services_by_id[service_id] = {
+                        "service_id": service_id,
+                        "maintenance_type_id": maintenance_type_id,
+                        "maintenance_name": maintenance_name,
+                        "miles_at_service": miles_at_service,
+                        "date": date,
+                        "parts": []
+                    }
+                if part_id:
+                    services_by_id[service_id]["parts"].append({
+                        "part_id": part_id,
+                        "name": part_name,
+                        "brand": brand,
+                        "price_at_service_cents": price_at_service_cents
+                    })
+    services = list(services_by_id.values())
     return {"services": services}
 
 

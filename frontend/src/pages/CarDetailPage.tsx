@@ -4,6 +4,12 @@ import apiFetch from '../api';
 import type { Car } from './CarsDashboard';
 
 
+type Part = {
+    part_id: number;
+    name: string;
+    brand: string;
+    price_at_service_cents: number | null;
+}
 
 
 type Service = {
@@ -12,8 +18,9 @@ type Service = {
     maintenance_name: string;
     miles_at_service: number;
     date: string;
-
+    parts: Part[];
 }
+
 
 function CarDetailPage() {
 
@@ -66,6 +73,15 @@ function CarDetailPage() {
                         {service.date}: {service.maintenance_name} at {service.miles_at_service} miles
                         {" "}
                         <Link to={`/cars/${carId}/services/${service.service_id}/parts/new`}>Attach Part</Link>
+                        <ul>
+                            {service.parts.map((part) => (
+                                <li key={part.part_id}>
+                                    {part.name} ({part.brand})
+                                    {part.price_at_service_cents !== null && ` - $${(part.price_at_service_cents / 100).toFixed(2)}`}
+                                </li>
+                            ))}
+                        </ul>
+                        
                     </li>
                 ))}
             </ul>

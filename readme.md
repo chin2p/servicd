@@ -44,8 +44,7 @@ Frontend has signup, login, a cars dashboard, a car detail page, an "add a car" 
 service" form, and an "attach a part" form working end-to-end (`/signup`, `/login`, `/cars`,
 `/cars/:carId`, `/cars/new`, `/cars/:carId/services/new`,
 `/cars/:carId/services/:serviceId/parts/new`), with the JWT stored in `localStorage` after login.
-Known gap: attached parts aren't shown anywhere in the UI yet (backend doesn't return that data
-yet either) — next up.
+The car detail page now also shows each service's attached parts and prices.
 
 ## Getting Started
 
