@@ -12,7 +12,7 @@ type MaintenanceType = {
 function LogServicePage() {
     const { carId } = useParams<{ carId: string }>()
     const [maintenanceTypes, setMaintenanceTypes] = useState<MaintenanceType[]>([]);
-    const [maintenanceTypeId, setMaintenanceTypeId] = useState("");
+    const [maintenanceTypeName, setMaintenanceTypeName] = useState("");
     const [milesAtService, setMilesAtService] = useState("");
     const [date, setDate] = useState("");
     const [error, setError] = useState<string | null>(null);
@@ -36,12 +36,18 @@ function LogServicePage() {
     async function handleSubmit(e: FormEvent<HTMLFormElement>) {
         e.preventDefault();
         setError(null);
+        
         try {
+            const maintData = await apiFetch("/maintenance_type", {
+                method: "POST",
+                body: JSON.stringify({ name: maintenanceTypeName })
+            })
+        
             await apiFetch("/service", {
                 method: "POST",
                 body: JSON.stringify({
                     car_id: Number(carId),
-                    maintenance_type_id: Number(maintenanceTypeId),
+                    maintenance_type_id: maintData.maintenance_type_id,
                     miles_at_service: Number(milesAtService),
                     date
                 })
@@ -55,14 +61,20 @@ function LogServicePage() {
     }
     return (
         <form onSubmit={handleSubmit}>
-            <select value={maintenanceTypeId} onChange={(e) => setMaintenanceTypeId(e.target.value)}>
-                <option value="">Select maintenance type</option>
-                
+            <input
+                list="maintenance-types"
+                value={maintenanceTypeName}
+                onChange={(e) => setMaintenanceTypeName(e.target.value)}
+                placeholder="Maintenance type"
+            />
+            <datalist id="maintenance-types">
                 {maintenanceTypes.map((mt) => (
-                    <option key={mt.maintenance_type_id} value={mt.maintenance_type_id}>{mt.name}</option>
-                ))}
+                    <option key={mt.maintenance_type_id} value={mt.name} />
 
-            </select>
+                ))}
+            </datalist>
+
+
             <input value={milesAtService} onChange={(e) => setMilesAtService(e.target.value)} placeholder="Miles at Service" />
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             <button type="submit">Log Service</button>

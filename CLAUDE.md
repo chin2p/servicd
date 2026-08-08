@@ -220,19 +220,50 @@ get working code fast. When helping:
     `CarsDashboard`/`CarDetailPage` (read-only, an error is a dead end), a failed submission here
     needs the form to stay visible so the user can fix their input and retry. Verified end-to-end:
     full two-step submission lands a new car on `/cars`.
-  - `src/pages/LogServicePage.tsx` (`/cars/:carId/services/new`) — first form using a `<select>`
-    populated from a fetched catalog (`GET /maintenance_types` on mount, same `useEffect` pattern
-    as `CarsDashboard`, rendered as `<option>`s via `.map()`) instead of a raw ID input, so the
-    user picks a real maintenance type rather than guessing an ID. `<input type="date">` needed
-    no conversion — its `"YYYY-MM-DD"` value already matches what the backend's `date` field
-    expects, unlike `miles_at_service` (still needs `Number(...)`, same reasoning as `year`
-    elsewhere). Two real bugs caught in review: `error` state was being set but never rendered
-    anywhere in the JSX (user caught this one themselves before asking), and
-    `navigate("/cars/$(carID)")` — not inside backticks so `$(carID)` was a literal string, not
-    interpolation, plus `carID` didn't match the actual variable `carId` (case-sensitive). Fixed
-    to `` navigate(`/cars/${carId}`) ``. Linked from `CarDetailPage` via `<Link to={\`/cars/${carId}/services/new\`}>`.
-    Verified end-to-end: submitting lands back on the car's detail page with the new service
-    showing in its history.
+  - `src/pages/LogServicePage.tsx` (`/cars/:carId/services/new`) — first form populated from a
+    fetched catalog (`GET /maintenance_types` on mount, same `useEffect` pattern as
+    `CarsDashboard`). `<input type="date">` needed no conversion — its `"YYYY-MM-DD"` value
+    already matches what the backend's `date` field expects, unlike `miles_at_service` (still
+    needs `Number(...)`, same reasoning as `year` elsewhere). Two real bugs caught in initial
+    review: `error` state was being set but never rendered anywhere in the JSX (user caught this
+    one themselves before asking), and `navigate("/cars/$(carID)")` — not inside backticks so
+    `$(carID)` was a literal string, not interpolation, plus `carID` didn't match the actual
+    variable `carId` (case-sensitive). Linked from `CarDetailPage` via `<Link to={\`/cars/${carId}/services/new\`}>`.
+    **Upgraded from a `<select>` to an `<input list>`/`<datalist>` combo** once the user asked a
+    genuinely good product question — "how does a user log a maintenance type that isn't in the
+    catalog yet?" — since a plain dropdown only lets you pick from what already exists. A
+    `<datalist>` behaves differently from `<select>`: it doesn't carry a hidden `value`/`id`
+    separate from the displayed text, so the input holds the type's *name* (string), not its ID.
+    This changed `handleSubmit` into a two-step call: `POST /maintenance_type` first (idempotent
+    find-or-create — works identically whether the name is new or already exists) to resolve the
+    name to an ID, *then* `POST /service` with that ID. Considered `react-select`'s `Creatable`
+    variant (the fuller "real" production pattern — search-as-you-type plus an explicit "Create
+    X" affordance) but chose the dependency-free native `datalist` approach instead, since the
+    core name-to-ID resolution logic is identical either way and the UI layer can be swapped
+    later with low risk if ever needed. Verified end-to-end against both an existing type and a
+    brand-new one (confirmed the new one landed in `maintenance_type` via a direct query).
+  - `src/pages/AttachPartPage.tsx` (`/cars/:carId/services/:serviceId/parts/new`) — same
+    `datalist`-based find-or-create pattern as the upgraded `LogServicePage`, applied to `part`.
+    One added wrinkle `maintenance_type` didn't have: a part's identity is `part_name` **+**
+    `brand` together (the composite `UNIQUE`), so this needed *two* separate datalist-backed
+    inputs (name, brand) rather than one, both drawing their suggestions from the same single
+    fetched `parts` array (mapping it twice — once for `.name`, once for `.brand` — rather than
+    fetching two separate catalogs). `handleSubmit` is a three-value two-step call: `POST /part`
+    with `{name, brand}` to resolve/create a `part_id`, then `POST /service_part` with that
+    `part_id` plus `service_id` (from the URL) and `price_at_service_cents`. The latter
+    deliberately reuses the empty-string-to-`undefined` pattern from `AddCarPage`'s `vin` field —
+    `Number("")` evaluates to `0` in JavaScript (not `NaN`), which would have silently submitted
+    a "free" price instead of "unknown," violating the exact same principle already established
+    for `part.price_cents` on the backend (unknown price ≠ $0 price). Required real back-and-forth
+    debugging on the user's part around conflating two different pieces of state into one
+    variable (the fetched catalog array vs. the user's typed text) before landing on the correct
+    `parts`/`partName`/`brand` three-way split — a good worked example of the general "what state
+    does this component need" reasoning process (used moving forward: list every field the
+    target API call's body needs → check if anything needs fetching just to populate choices →
+    pull out anything URL-derived via `useParams` → add `error`/`loading` by default). Linked
+    from each service in `CarDetailPage`'s history list. Verified end-to-end via a direct `psql`
+    check of the `service_part` table (confirmed the row, including a `NULL` price when left
+    blank, not `0`).
 - `readme.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
   sync when project state changes — this file is for my working context, `readme.md` is for
   humans/GitHub visitors.
@@ -400,7 +431,9 @@ Backend: all 8 tables have a working, tested `POST` endpoint, plus 5 `GET` endpo
 read+write coverage with authorization checks everywhere ownership matters.
 
 Frontend: signup, login, the `/cars` dashboard, the car detail page, adding a car (`/cars/new`),
-and logging a service (`/cars/:carId/services/new`) are all done and verified end-to-end.
-Decided approach: keep building out write-side forms before any visual polish pass. Next: not
-yet decided — candidates are attaching parts to a service (`POST /service_part`), or a form for
-`part`/`service_scheduled`, or starting the polish pass now that the core write flows all work.
+logging a service (`/cars/:carId/services/new`), and attaching a part to a service
+(`/cars/:carId/services/:serviceId/parts/new`) are all done and verified end-to-end. Known gap,
+next up: attached parts aren't visible anywhere in the UI yet — `GET /cars/{car_id}/services`
+doesn't return parts data at all, so `CarDetailPage`'s service history can't display them.
+Needs a backend change (extend that endpoint, or add a new one, to include each service's
+attached parts) before the frontend display work can happen.

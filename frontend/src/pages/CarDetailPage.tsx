@@ -64,6 +64,8 @@ function CarDetailPage() {
                 {services.map((service) => (
                     <li key={service.service_id}>
                         {service.date}: {service.maintenance_name} at {service.miles_at_service} miles
+                        {" "}
+                        <Link to={`/cars/${carId}/services/${service.service_id}/parts/new`}>Attach Part</Link>
                     </li>
                 ))}
             </ul>

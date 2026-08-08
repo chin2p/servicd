@@ -40,9 +40,12 @@ with ownership checks anywhere they matter:
 - `GET /maintenance_types` — browse the maintenance-type catalog (public, no auth needed)
 - `GET /parts` — browse the parts catalog (public, no auth needed)
 
-Frontend has signup, login, a cars dashboard, a car detail page, an "add a car" form, and a "log
-a service" form working end-to-end (`/signup`, `/login`, `/cars`, `/cars/:carId`, `/cars/new`,
-`/cars/:carId/services/new`), with the JWT stored in `localStorage` after login.
+Frontend has signup, login, a cars dashboard, a car detail page, an "add a car" form, a "log a
+service" form, and an "attach a part" form working end-to-end (`/signup`, `/login`, `/cars`,
+`/cars/:carId`, `/cars/new`, `/cars/:carId/services/new`,
+`/cars/:carId/services/:serviceId/parts/new`), with the JWT stored in `localStorage` after login.
+Known gap: attached parts aren't shown anywhere in the UI yet (backend doesn't return that data
+yet either) — next up.
 
 ## Getting Started
 
