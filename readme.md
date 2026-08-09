@@ -39,13 +39,14 @@ with ownership checks anywhere they matter:
 - `GET /cars/{car_id}/services` — service history for one car (must belong to the logged-in user)
 - `GET /maintenance_types` — browse the maintenance-type catalog (public, no auth needed)
 - `GET /parts` — browse the parts catalog (public, no auth needed)
+- `GET /vin/{vin}/decode` — decode a VIN via NHTSA's public API to auto-fill year/make/model/engine
 
 Frontend has a home page, signup, login, a cars dashboard, a car detail page, an "add a car"
-form, a "log a service" form, and an "attach a part" form working end-to-end (`/`, `/signup`,
-`/login`, `/cars`, `/cars/:carId`, `/cars/new`, `/cars/:carId/services/new`,
-`/cars/:carId/services/:serviceId/parts/new`), with the JWT stored in `localStorage` after
-login, a shared nav bar with logout, and a Tailwind-styled UI throughout. The car detail page
-shows each service's attached parts and prices.
+form (VIN decode with manual-entry fallback), a "log a service" form, and an "attach a part"
+form working end-to-end (`/`, `/signup`, `/login`, `/cars`, `/cars/:carId`, `/cars/new`,
+`/cars/:carId/services/new`, `/cars/:carId/services/:serviceId/parts/new`), with the JWT stored
+in `localStorage` after login, a shared nav bar with logout, and a Tailwind-styled UI throughout.
+The car detail page shows each service's attached parts and prices.
 
 ## Getting Started
 
@@ -67,7 +68,7 @@ psql servicd -f servicdDB.sql
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install fastapi uvicorn "psycopg[binary]" python-dotenv bcrypt pyjwt psycopg_pool
+pip install fastapi uvicorn "psycopg[binary]" python-dotenv bcrypt pyjwt psycopg_pool requests
 ```
 
 Create a `backend/.env` file with your local database credentials and a JWT signing secret:

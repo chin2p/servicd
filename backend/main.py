@@ -8,7 +8,7 @@ from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 import jwt
 from datetime import datetime, date, timedelta, timezone
-
+import requests
 
 
 
@@ -434,3 +434,28 @@ def get_parts():
 
     return {"parts": parts}
 
+
+
+@app.get("/vin/{vin}/decode")
+
+def vin_decode(vin: str, user_id = Depends(get_current_user)):
+    try:
+        response = requests.get(
+            f"https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvalues/{vin}?format=json",
+            timeout=5
+        )
+        response.raise_for_status()
+    except requests.exceptions.RequestException:
+        raise HTTPException(status_code=503, detail="Unable to reach VIN decoding service")
+
+    data = response.json()
+    result = data["Results"][0]
+    if result["Make"] == "" and result["Model"] == "":
+        raise HTTPException(status_code=404, detail="VIN not recognized")
+
+    return {
+        "year": result["ModelYear"],
+        "make": result["Make"],
+        "model": result["Model"],
+        "engine": f"{result["DisplacementL"][0:3]}L {result["EngineCylinders"]} Cyl {result["EngineModel"]}"
+    }

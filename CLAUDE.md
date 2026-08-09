@@ -30,7 +30,9 @@ get working code fast. When helping:
   (git-ignored) rather than hardcoding them. `bcrypt` for password hashing, `pyjwt` for
   authentication tokens (see login/auth design below). `psycopg_pool` for connection pooling
   (see below) — all endpoints borrow connections from a shared pool rather than opening a new
-  one per request.
+  one per request. `requests` for calling NHTSA's public VIN-decode API (see `GET /vin/{vin}/decode`
+  below) — the first outbound call this backend makes to a third-party service, as opposed to
+  its own database.
 - **Database:** PostgreSQL (database name: `servicd`)
 - **Frontend:** React + TypeScript (via Vite), ESLint for linting, Tailwind CSS v4 for styling
 - **Mobile (future, not started):** Native — Swift/SwiftUI (iOS), Kotlin/Jetpack Compose (Android).
@@ -63,7 +65,7 @@ get working code fast. When helping:
     Verified working end-to-end, including that the pool correctly recovers a connection after
     an aborted transaction (tested: a failed `POST /car` request immediately followed by a
     successful `POST /car_config` on the same pool, no issues).
-  - `main.py` — fourteen working FastAPI endpoints, plus a reusable auth dependency:
+  - `main.py` — fifteen working FastAPI endpoints, plus a reusable auth dependency:
     - `POST /users`: validates the request body via a Pydantic `UserCreate` model (`username`,
       `password`, optional `name`), hashes the password with `bcrypt.hashpw` (salt embedded
       automatically — see schema notes below), inserts via a parameterized query (`%s`
@@ -160,7 +162,20 @@ get working code fast. When helping:
       being public also lets a frontend populate dropdowns before a user is logged in, and makes
       the response cacheable (identical for every caller, unlike a per-user authenticated
       response).
-    - All fourteen endpoints use `with pool.connection() as conn: with conn.cursor() as cur:`
+    - `GET /vin/{vin}/decode`: calls NHTSA's free public `decodevinvalues` API via `requests`,
+      returning `year`/`make`/`model`/`engine` to pre-fill the frontend's "add a car" flow.
+      Requires `Depends(get_current_user)` — an anti-abuse gate for a different reason than the
+      `POST` endpoints: every call here triggers an *outbound* call to a third party, so an
+      unauthenticated flood would let anyone hammer NHTSA's service through this backend.
+      `response.raise_for_status()` inside a `try`/`except requests.exceptions.RequestException`
+      catches network failures/timeouts (`timeout=5` set explicitly — an external service could
+      otherwise hang the request indefinitely) and turns them into a clean `503`. Real bug caught
+      in review, confirmed by testing the live NHTSA API directly: initial code checked
+      `result["Make"] is None` to detect an unrecognized VIN, but NHTSA actually returns empty
+      strings (`""`) for missing data, never `null` — so that check silently never fired, and
+      invalid VINs returned a `200` with blank fields instead of a `404`. Fixed by checking
+      `== ""` instead, verified against both a real VIN and a deliberately invalid one.
+    - All fifteen endpoints use `with pool.connection() as conn: with conn.cursor() as cur:`
       instead of manual `.close()` calls — guarantees the connection is returned to the pool
       (not leaked) even when an exception/`HTTPException` is raised inside the block.
     - `CORSMiddleware` added, `allow_origins` scoped specifically to `http://localhost:5173`
@@ -238,6 +253,23 @@ get working code fast. When helping:
     `CarsDashboard`/`CarDetailPage` (read-only, an error is a dead end), a failed submission here
     needs the form to stay visible so the user can fix their input and retry. Verified end-to-end:
     full two-step submission lands a new car on `/cars`.
+    **Later expanded to three steps** to add VIN decoding: a new step 1 asks for a VIN, with
+    three actions — "Decode" (`GET /vin/{vin}/decode`, pre-fills year/make/model/engine and
+    advances), "Skip, I'll enter manually" (advances with fields blank), or Cancel (`<Link
+    to="/cars">`, present on every step — no partial progress is persisted, so navigating away
+    just abandons it). Step 1 uses plain buttons with individual `onClick` handlers rather than
+    a `<form onSubmit>`, since it has three distinct actions, not one submission; introduces a
+    per-action `decoding` loading state (disables/relabels just the Decode button while in
+    flight) as distinct from the whole-page `loading` pattern used on read-only pages. The old
+    steps shifted to 2 (car details, now with `required` on `year`/`make`/`model` — native HTML
+    validation, blocks submission client-side before the backend's own validation even runs) and
+    3 (VIN/mileage confirmation, `vin` carried over in state from step 1). Two real bugs caught
+    in review: the decode fetch call was missing its leading `/` (`apiFetch` just concatenates
+    `BASE_URL + path`, so this produced a malformed URL), and `handleCarSubmit`'s request body
+    was missing `vin` entirely after the restructure. Also caught: a trailing slash on the
+    decode URL didn't match the backend route exactly, silently working only via an automatic
+    `307` redirect — confirmed via a direct `curl -i` test showing the redirect `Location`
+    header — removed to hit the endpoint directly.
   - `src/pages/LogServicePage.tsx` (`/cars/:carId/services/new`) — first form populated from a
     fetched catalog (`GET /maintenance_types` on mount, same `useEffect` pattern as
     `CarsDashboard`). `<input type="date">` needed no conversion — its `"YYYY-MM-DD"` value
@@ -462,15 +494,16 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
   path once refresh tokens are built, not dismissed.
 
 ## Next Steps (not yet done)
-Backend: all 8 tables have a working, tested `POST` endpoint, plus 5 `GET` endpoints — full
-read+write coverage with authorization checks everywhere ownership matters.
+Backend: all 8 tables have a working, tested `POST` endpoint, plus 5 `GET` endpoints, plus
+`GET /vin/{vin}/decode` (NHTSA integration) — full read+write coverage with authorization checks
+everywhere ownership matters.
 
 Frontend: signup, login, the `/cars` dashboard, the car detail page (now including each
-service's attached parts, nested under it, with prices), adding a car (`/cars/new`), logging a
-service (`/cars/:carId/services/new`), and attaching a part to a service
+service's attached parts, nested under it, with prices), adding a car (now a three-step
+`/cars/new` flow with VIN decoding, skip-to-manual, and cancel on every step), logging a service
+(`/cars/:carId/services/new`), and attaching a part to a service
 (`/cars/:carId/services/:serviceId/parts/new`) are all done and verified end-to-end. Visual
-polish pass complete (Tailwind CSS, shared nav/logout, home page) — see Tech Stack /
-Environment Status above.
+polish pass complete (Tailwind CSS, shared nav/logout, home page).
 
 Next: not yet decided between two candidates, both explicitly called out in the Project
 Overview as this app's core differentiating features and neither touched yet:
