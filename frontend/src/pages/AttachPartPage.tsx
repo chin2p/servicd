@@ -1,8 +1,12 @@
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useState, useEffect } from "react";
 import type { FormEvent } from "react"
 import { useNavigate } from "react-router-dom";
 import apiFetch from "../api";
+import Layout from "../components/Layout";
+
+const inputClass =
+    "w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500";
 
 type PartType = {
     part_id: number,
@@ -41,7 +45,7 @@ function AttachPartPage() {
         try {
             const pData = await apiFetch("/part", {
                 method: "POST",
-                body: JSON.stringify({ 
+                body: JSON.stringify({
                     name: partName,
                     brand: brand
                  })
@@ -63,38 +67,47 @@ function AttachPartPage() {
         }
     }
     return (
-        <form onSubmit={handleSubmit}>
+        <Layout>
+            <Link to={`/cars/${carId}`} className="text-sm text-slate-500 hover:text-slate-900">
+                &larr; Back to car
+            </Link>
 
-            <input
-                list="part-types"
-                value={(partName)}
-                onChange={(e) => setPartName(e.target.value)}
-                placeholder="Part type"
-            />
-            <datalist id="part-types">
-                {parts.map((pt) => (
-                    <option key={pt.part_id} value={pt.name} />
-                ))}
-            </datalist>
-            <input
-                list="brand-types"
-                value={(brand)}
-                onChange={(e) => setBrand(e.target.value)}
-                placeholder="Brand (or Unknown)"
-            />
-            <datalist id="brand-types">
-                {parts.map((pt) => (
-                    <option key={pt.part_id} value={pt.brand} />
-                ))}
-            </datalist>
-            
-            <input type="number" placeholder="Price at Service (optional)" value={priceAtService} onChange={(e) => setPriceAtService(e.target.value)} />
-            <button type="submit">Log Part</button>
-            {error && <p>{error}</p>}
-        
-        
-        </form>
+            <div className="mx-auto mt-4 max-w-md rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
+                <h1 className="text-xl font-semibold text-slate-900">Attach a part</h1>
+                <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+                    <input
+                        list="part-types"
+                        value={(partName)}
+                        onChange={(e) => setPartName(e.target.value)}
+                        placeholder="Part type"
+                        className={inputClass}
+                    />
+                    <datalist id="part-types">
+                        {parts.map((pt) => (
+                            <option key={pt.part_id} value={pt.name} />
+                        ))}
+                    </datalist>
+                    <input
+                        list="brand-types"
+                        value={(brand)}
+                        onChange={(e) => setBrand(e.target.value)}
+                        placeholder="Brand (or Unknown)"
+                        className={inputClass}
+                    />
+                    <datalist id="brand-types">
+                        {parts.map((pt) => (
+                            <option key={pt.part_id} value={pt.brand} />
+                        ))}
+                    </datalist>
 
+                    <input type="number" placeholder="Price at Service (optional)" value={priceAtService} onChange={(e) => setPriceAtService(e.target.value)} className={inputClass} />
+                    <button type="submit" className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+                        Attach Part
+                    </button>
+                    {error && <p className="text-sm text-red-600">{error}</p>}
+                </form>
+            </div>
+        </Layout>
     )
 
 }

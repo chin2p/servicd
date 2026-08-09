@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom'
+import HomePage from './pages/HomePage.tsx'
 import SignupPage from './pages/SignupPage.tsx'
 import LoginPage from './pages/LoginPage.tsx'
 import CarsDashboard from './pages/CarsDashboard.tsx'
@@ -12,6 +13,7 @@ import AttachPartPage from './pages/AttachPartPage.tsx'
 function App() {
   return (
     <Routes>
+      <Route path="/" element={<HomePage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/cars" element={<CarsDashboard />} />
@@ -19,7 +21,7 @@ function App() {
       <Route path="/cars/new" element={<AddCarPage />} />
       <Route path="/cars/:carId/services/new" element={<LogServicePage />} />
       <Route path="/cars/:carId/services/:serviceId/parts/new" element={<AttachPartPage />} />
-      
+
     </Routes>
   )
 }

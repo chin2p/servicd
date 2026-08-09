@@ -32,7 +32,7 @@ get working code fast. When helping:
   (see below) — all endpoints borrow connections from a shared pool rather than opening a new
   one per request.
 - **Database:** PostgreSQL (database name: `servicd`)
-- **Frontend:** React + TypeScript (via Vite), ESLint for linting
+- **Frontend:** React + TypeScript (via Vite), ESLint for linting, Tailwind CSS v4 for styling
 - **Mobile (future, not started):** Native — Swift/SwiftUI (iOS), Kotlin/Jetpack Compose (Android).
   Chosen over cross-platform frameworks because native feel was prioritized over code sharing.
 
@@ -282,6 +282,23 @@ get working code fast. When helping:
     from each service in `CarDetailPage`'s history list. Verified end-to-end via a direct `psql`
     check of the `service_part` table (confirmed the row, including a `NULL` price when left
     blank, not `0`).
+  - **Visual polish pass** — added `tailwindcss` + `@tailwindcss/vite` (v4, the modern setup: a
+    Vite plugin plus a single `@import "tailwindcss";` in `index.css`, no separate config file
+    needed). User chose this over plain CSS or a component library, explicitly for the real-world
+    skill (utility classes are the dominant styling approach in production React apps). Since
+    this was framed as design polish rather than logic to derive, the collaboration mode shifted
+    from the teach/pseudocode/write-it-yourself loop to Claude applying styling directly across
+    all pages, user reviewing — a deliberate one-off departure from the usual workflow, agreed
+    with the user first rather than assumed. Added `src/components/Layout.tsx` — a shared nav
+    header (branding + a **Log out** button) wrapping every authenticated page; logout didn't
+    exist anywhere in the app before this. Added `src/pages/HomePage.tsx` for the previously
+    unhandled `/` route: `<Navigate to="/cars" replace />` if a token already exists in
+    `localStorage` (first use of React Router's *declarative* redirect, vs. the `useNavigate()`
+    *imperative* pattern used everywhere else — appropriate here since the redirect condition is
+    known synchronously at render time, not triggered by a user action), otherwise a simple
+    pitch + Sign Up/Log In buttons for logged-out visitors. Cleaned up dead files left over from
+    the original Vite scaffold (`App.css`, unused SVGs/`hero.png`, none referenced anywhere
+    anymore) and updated the browser tab title from the Vite default to "Servicd".
 - `readme.md` (separate file, human-facing) now exists alongside this `CLAUDE.md`; keep both in
   sync when project state changes — this file is for my working context, `readme.md` is for
   humans/GitHub visitors.
@@ -451,8 +468,16 @@ read+write coverage with authorization checks everywhere ownership matters.
 Frontend: signup, login, the `/cars` dashboard, the car detail page (now including each
 service's attached parts, nested under it, with prices), adding a car (`/cars/new`), logging a
 service (`/cars/:carId/services/new`), and attaching a part to a service
-(`/cars/:carId/services/:serviceId/parts/new`) are all done and verified end-to-end. Next: not
-yet decided — the core write+read loop is now fully closed (nothing built that isn't also
-visible somewhere in the UI), so remaining candidates are a form for `service_scheduled`
-(maintenance recommendations — the app's core differentiating feature per Project Overview,
-not yet touched at all on the frontend), or starting a visual polish pass.
+(`/cars/:carId/services/:serviceId/parts/new`) are all done and verified end-to-end. Visual
+polish pass complete (Tailwind CSS, shared nav/logout, home page) — see Tech Stack /
+Environment Status above.
+
+Next: not yet decided between two candidates, both explicitly called out in the Project
+Overview as this app's core differentiating features and neither touched yet:
+1. **Maintenance recommendations** — `POST /service_scheduled` exists on the backend, but
+   nothing surfaces schedules anywhere, and no logic yet actually calculates "due soon" by
+   combining a car's schedule rules with its service history and current mileage/date.
+2. **Cost insights** — cost-per-mile, cost breakdown by category. Needs new aggregate queries
+   (`SUM`/`GROUP BY`, not used anywhere yet) plus a display page.
+
+Deployment (this has all been local dev only so far) is a third, lower-priority candidate.

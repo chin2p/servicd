@@ -12,7 +12,7 @@ cross-platform.
 - **Backend:** Python, FastAPI, Uvicorn, `psycopg` (raw SQL, no ORM) with `psycopg_pool` for
   connection pooling, `bcrypt` + `pyjwt` for auth
 - **Database:** PostgreSQL
-- **Frontend:** React, TypeScript, Vite
+- **Frontend:** React, TypeScript, Vite, Tailwind CSS
 
 ## Project Status
 
@@ -40,11 +40,12 @@ with ownership checks anywhere they matter:
 - `GET /maintenance_types` — browse the maintenance-type catalog (public, no auth needed)
 - `GET /parts` — browse the parts catalog (public, no auth needed)
 
-Frontend has signup, login, a cars dashboard, a car detail page, an "add a car" form, a "log a
-service" form, and an "attach a part" form working end-to-end (`/signup`, `/login`, `/cars`,
-`/cars/:carId`, `/cars/new`, `/cars/:carId/services/new`,
-`/cars/:carId/services/:serviceId/parts/new`), with the JWT stored in `localStorage` after login.
-The car detail page now also shows each service's attached parts and prices.
+Frontend has a home page, signup, login, a cars dashboard, a car detail page, an "add a car"
+form, a "log a service" form, and an "attach a part" form working end-to-end (`/`, `/signup`,
+`/login`, `/cars`, `/cars/:carId`, `/cars/new`, `/cars/:carId/services/new`,
+`/cars/:carId/services/:serviceId/parts/new`), with the JWT stored in `localStorage` after
+login, a shared nav bar with logout, and a Tailwind-styled UI throughout. The car detail page
+shows each service's attached parts and prices.
 
 ## Getting Started
 
