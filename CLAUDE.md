@@ -65,7 +65,7 @@ get working code fast. When helping:
     Verified working end-to-end, including that the pool correctly recovers a connection after
     an aborted transaction (tested: a failed `POST /car` request immediately followed by a
     successful `POST /car_config` on the same pool, no issues).
-  - `main.py` — fifteen working FastAPI endpoints, plus a reusable auth dependency:
+  - `main.py` — nineteen working FastAPI endpoints, plus a reusable auth dependency:
     - `POST /users`: validates the request body via a Pydantic `UserCreate` model (`username`,
       `password`, optional `name`), hashes the password with `bcrypt.hashpw` (salt embedded
       automatically — see schema notes below), inserts via a parameterized query (`%s`
@@ -175,7 +175,28 @@ get working code fast. When helping:
       strings (`""`) for missing data, never `null` — so that check silently never fired, and
       invalid VINs returned a `200` with blank fields instead of a `404`. Fixed by checking
       `== ""` instead, verified against both a real VIN and a deliberately invalid one.
-    - All fifteen endpoints use `with pool.connection() as conn: with conn.cursor() as cur:`
+    - **First four `DELETE` endpoints**, added in escalating order of blast radius (smallest
+      first, most consequential last), each reusing the same ownership-check pattern already
+      established for reads/writes:
+      - `DELETE /service_part/{service_id}/{part_id}`: composite-key deletion (both IDs as path
+        params, matching `service_part`'s composite primary key). First use of `cur.rowcount`
+        (not `RETURNING`/`fetchone()`, since a `DELETE` has nothing meaningful to hand back) —
+        `0` after the `DELETE` means nothing matched, i.e. that part was never attached to that
+        service, translated into a `404`.
+      - `DELETE /service/{service_id}` and `DELETE /car/{car_id}`: same ownership-check-then-
+        delete shape; no `rowcount` check needed here since the ownership `SELECT` already
+        confirms the row exists before the `DELETE` runs. Both rely entirely on the schema's
+        existing `ON DELETE CASCADE` chain for cleanup (deleting a car with a service that has
+        an attached part removes all three rows in one call) — verified for real, not just
+        assumed from the schema, by creating disposable test data with a part attached and
+        confirming all three rows vanished after a single `DELETE /car` call.
+      - `DELETE /users/me`: deliberately has **no `user_id` path parameter at all** — always
+        deletes whichever account the verified token belongs to, never an ID the client
+        supplies, closing the same category of vulnerability `POST /car` was built to avoid
+        (never trust a client-supplied identifier for "which account/resource does this affect").
+        Verified end-to-end with a disposable throwaway user: row confirmed gone via `psql`, and
+        a follow-up login attempt correctly failed.
+    - All nineteen endpoints use `with pool.connection() as conn: with conn.cursor() as cur:`
       instead of manual `.close()` calls — guarantees the connection is returned to the pool
       (not leaked) even when an exception/`HTTPException` is raised inside the block.
     - `CORSMiddleware` added, `allow_origins` scoped specifically to `http://localhost:5173`
@@ -237,6 +258,18 @@ get working code fast. When helping:
     enforced everywhere else in this project. One structural bug caught in review: the inner
     `.map()`'s `<li>` elements were initially direct children of the outer service `<li>` with no
     wrapping `<ul>` — same category of invalid-list-nesting mistake as `CarsDashboard` earlier.
+    **Later extended with delete buttons** for car/service/part, each `window.confirm(...)`-gated
+    before calling its `DELETE` endpoint. Deleting a car/service updates local state by filtering
+    it out of the `services`/removal via `navigate("/cars")`; deleting a part is the trickiest —
+    since `parts` is nested *inside* one specific service inside the outer `services` array,
+    removing one requires `.map()`-ing the outer array, and only for the matching service,
+    returning a **new** object (`{...service, parts: service.parts.filter(...)}`) rather than
+    mutating it directly. Two real bugs caught in review on the user's first attempt: comparing
+    `services.service_id` (the whole array, which has no such property — always `undefined`,
+    making the check permanently `true` and the function a silent no-op) instead of `service`
+    (the loop variable), and the handler doing only the local state update with no actual
+    `DELETE` call, `confirm()`, or error handling at all — fixed to match the same
+    confirm/try-`apiFetch`/catch shape as the other two delete handlers.
   - `src/pages/AddCarPage.tsx` (`/cars/new`) — two-step form in a single component, using a
     `step` state variable (`1`/`2`) with plain `if (step === 1) return (...)` early-return logic
     to switch between forms, rather than two separate routes — matches the two-call backend flow
@@ -323,7 +356,11 @@ get working code fast. When helping:
     all pages, user reviewing — a deliberate one-off departure from the usual workflow, agreed
     with the user first rather than assumed. Added `src/components/Layout.tsx` — a shared nav
     header (branding + a **Log out** button) wrapping every authenticated page; logout didn't
-    exist anywhere in the app before this. Added `src/pages/HomePage.tsx` for the previously
+    exist anywhere in the app before this. **Later added a "Delete Account" button** next to
+    Log out — `window.confirm(...)`-gated, calls `DELETE /users/me`, then does the same
+    cleanup as logout on success. Uses `alert()` for the error case rather than an inline error
+    message, since `Layout` wraps every page and has no page-specific error state of its own to
+    render into, unlike individual pages. Added `src/pages/HomePage.tsx` for the previously
     unhandled `/` route: `<Navigate to="/cars" replace />` if a token already exists in
     `localStorage` (first use of React Router's *declarative* redirect, vs. the `useNavigate()`
     *imperative* pattern used everywhere else — appropriate here since the redirect condition is
@@ -495,15 +532,17 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
 
 ## Next Steps (not yet done)
 Backend: all 8 tables have a working, tested `POST` endpoint, plus 5 `GET` endpoints, plus
-`GET /vin/{vin}/decode` (NHTSA integration) — full read+write coverage with authorization checks
-everywhere ownership matters.
+`GET /vin/{vin}/decode` (NHTSA integration), plus 4 `DELETE` endpoints (part-from-service,
+service, car, account — in escalating order of blast radius) — full read+write+delete coverage
+with authorization checks everywhere ownership matters.
 
 Frontend: signup, login, the `/cars` dashboard, the car detail page (now including each
-service's attached parts, nested under it, with prices), adding a car (now a three-step
-`/cars/new` flow with VIN decoding, skip-to-manual, and cancel on every step), logging a service
-(`/cars/:carId/services/new`), and attaching a part to a service
-(`/cars/:carId/services/:serviceId/parts/new`) are all done and verified end-to-end. Visual
-polish pass complete (Tailwind CSS, shared nav/logout, home page).
+service's attached parts, nested under it, with prices, and delete buttons for the car/each
+service/each part), adding a car (now a three-step `/cars/new` flow with VIN decoding,
+skip-to-manual, and cancel on every step), logging a service (`/cars/:carId/services/new`), and
+attaching a part to a service (`/cars/:carId/services/:serviceId/parts/new`) are all done and
+verified end-to-end. Visual polish pass complete (Tailwind CSS, shared nav/logout, home page).
+Delete-account button in the shared nav.
 
 Next: not yet decided between two candidates, both explicitly called out in the Project
 Overview as this app's core differentiating features and neither touched yet:
@@ -514,3 +553,17 @@ Overview as this app's core differentiating features and neither touched yet:
    (`SUM`/`GROUP BY`, not used anywhere yet) plus a display page.
 
 Deployment (this has all been local dev only so far) is a third, lower-priority candidate.
+
+## Future Feature Ideas (not scheduled, just captured)
+- **Receipt/photo OCR for logging services** — user uploads a photo or PDF of a service
+  receipt, a vision-capable AI extracts maintenance type/mileage/date/parts/prices, and
+  pre-fills `LogServicePage`/`AttachPartPage` for the user to review and confirm before
+  submitting. Deliberately favored over "AI second-guesses the manufacturer's maintenance
+  interval" (also discussed) — OCR's failure mode is low-risk (user corrects a misread field),
+  whereas AI-generated maintenance-interval advice risks giving wrong mechanical guidance with
+  real consequences. If pursued later, "AI commentary alongside the manufacturer schedule"
+  (e.g. "many 4Runner owners report changing oil more often than the factory 10k-mile
+  interval") is the safer framing — supplementary context, not a replacement number. OCR also
+  reuses the exact UX pattern already built for VIN decoding (fetch external data → pre-fill a
+  form → user reviews/edits/confirms), and would introduce file/image upload handling, a skill
+  not touched anywhere in this project yet.

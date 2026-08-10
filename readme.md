@@ -40,13 +40,18 @@ with ownership checks anywhere they matter:
 - `GET /maintenance_types` — browse the maintenance-type catalog (public, no auth needed)
 - `GET /parts` — browse the parts catalog (public, no auth needed)
 - `GET /vin/{vin}/decode` — decode a VIN via NHTSA's public API to auto-fill year/make/model/engine
+- `DELETE /service_part/{service_id}/{part_id}` — remove a part from one of your own services
+- `DELETE /service/{service_id}` — delete one of your own logged services
+- `DELETE /car/{car_id}` — delete one of your own cars (cascades to its service history)
+- `DELETE /users/me` — delete your own account (cascades to all your cars/services/parts)
 
 Frontend has a home page, signup, login, a cars dashboard, a car detail page, an "add a car"
 form (VIN decode with manual-entry fallback), a "log a service" form, and an "attach a part"
 form working end-to-end (`/`, `/signup`, `/login`, `/cars`, `/cars/:carId`, `/cars/new`,
 `/cars/:carId/services/new`, `/cars/:carId/services/:serviceId/parts/new`), with the JWT stored
 in `localStorage` after login, a shared nav bar with logout, and a Tailwind-styled UI throughout.
-The car detail page shows each service's attached parts and prices.
+The car detail page shows each service's attached parts and prices, with delete buttons for the
+car, each service, and each attached part; account deletion is available from the nav bar.
 
 ## Getting Started
 

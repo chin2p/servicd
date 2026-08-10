@@ -459,3 +459,83 @@ def vin_decode(vin: str, user_id = Depends(get_current_user)):
         "model": result["Model"],
         "engine": f"{result["DisplacementL"][0:3]}L {result["EngineCylinders"]} Cyl {result["EngineModel"]}"
     }
+
+
+#Deletion
+
+@app.delete("/service_part/{service_id}/{part_id}")
+
+def delete_part(service_id: int, part_id: int, user_id = Depends(get_current_user)):
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT car.user_id
+                            FROM service JOIN car ON service.car_id = car.car_id
+                            WHERE service.service_id = %s""", (service_id,))
+            row = cur.fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Service Not Found")
+
+            if row[0] != user_id:
+                raise HTTPException(status_code=403, detail="You do not own this service")
+
+            cur.execute("DELETE FROM service_part WHERE service_id = %s AND part_id = %s", (service_id, part_id,))
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="This part is not attached to this service")
+
+            conn.commit()
+
+    return({"detail": "Part removed from service"})
+
+
+@app.delete("/service/{service_id}")
+def delete_service(service_id: int, user_id: int = Depends(get_current_user)):
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT car.user_id
+                            FROM service JOIN car ON service.car_id = car.car_id
+                            WHERE service.service_id = %s""", (service_id,))
+            row = cur.fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Service not found")
+            if row[0] != user_id:
+                raise HTTPException(status_code=403, detail="You do not own this service")
+
+            # ON DELETE CASCADE on service_part.service_id handles cleanup of attached parts
+            cur.execute("DELETE FROM service WHERE service_id = %s", (service_id,))
+            conn.commit()
+
+    return {"detail": "Service deleted"}
+
+
+@app.delete("/car/{car_id}")
+def delete_car(car_id: int, user_id: int = Depends(get_current_user)):
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM car WHERE car_id = %s", (car_id,))
+            row = cur.fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Car not found")
+            if row[0] != user_id:
+                raise HTTPException(status_code=403, detail="You do not own this car")
+
+            # ON DELETE CASCADE on service.car_id (and service_part.service_id below it)
+            # handles cleanup of this car's service history and attached parts
+            cur.execute("DELETE FROM car WHERE car_id = %s", (car_id,))
+            conn.commit()
+
+    return {"detail": "Car deleted"}
+
+
+@app.delete("/users/me")
+def delete_account(user_id: int = Depends(get_current_user)):
+    # No car_id/user_id path parameter here, deliberately — this always deletes whichever
+    # account the verified token belongs to, never an ID supplied by the client. Otherwise
+    # a client could pass an arbitrary user_id and delete someone else's account.
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            # ON DELETE CASCADE on car.user_id (and everything cascading below it) handles
+            # cleanup of this user's cars, service history, and attached parts
+            cur.execute("DELETE FROM users WHERE user_id = %s", (user_id,))
+            conn.commit()
+
+    return {"detail": "Account deleted"}
