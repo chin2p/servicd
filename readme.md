@@ -13,6 +13,8 @@ cross-platform.
   connection pooling, `bcrypt` + `pyjwt` for auth
 - **Database:** PostgreSQL
 - **Frontend:** React, TypeScript, Vite, Tailwind CSS
+- **Testing:** `pytest` + FastAPI's `TestClient` for backend integration tests, run against an
+  isolated `servicd_test` database with automatic per-test rollback
 
 ## Project Status
 
@@ -52,6 +54,10 @@ form working end-to-end (`/`, `/signup`, `/login`, `/cars`, `/cars/:carId`, `/ca
 in `localStorage` after login, a shared nav bar with logout, and a Tailwind-styled UI throughout.
 The car detail page shows each service's attached parts and prices, with delete buttons for the
 car, each service, and each attached part; account deletion is available from the nav bar.
+
+Backend endpoints use dependency-injected database connections, so tests can swap in a
+transaction that always rolls back afterward — a small `pytest` suite covers `POST /users` and
+`POST /login` so far, with more endpoint coverage planned.
 
 ## Getting Started
 
@@ -102,6 +108,24 @@ npm run dev
 ```
 
 Runs at `http://localhost:5173`.
+
+### Testing
+
+```bash
+createdb servicd_test
+psql servicd_test -f servicdDB.sql
+```
+
+Create a `backend/.env.test` file identical to `.env` but with `DB_NAME=servicd_test`, then:
+
+```bash
+cd backend
+pip install pytest
+pytest tests/ -v
+```
+
+Each test runs inside a database transaction that's rolled back afterward, so the test database
+stays empty between runs regardless of what the endpoints under test insert.
 
 ## Database Schema
 

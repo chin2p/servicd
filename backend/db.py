@@ -15,6 +15,11 @@ secret_key = os.getenv("SECRET_KEY")
 pool = ConnectionPool(conninfo=f"dbname={db_name} user={db_user} password={db_password} host={db_host} port={db_port}")
 
 
+def get_db():
+    with pool.connection() as conn:
+        yield conn
+
+
 
 
 

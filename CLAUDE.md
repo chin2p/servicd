@@ -32,8 +32,11 @@ get working code fast. When helping:
   (see below) — all endpoints borrow connections from a shared pool rather than opening a new
   one per request. `requests` for calling NHTSA's public VIN-decode API (see `GET /vin/{vin}/decode`
   below) — the first outbound call this backend makes to a third-party service, as opposed to
-  its own database.
-- **Database:** PostgreSQL (database name: `servicd`)
+  its own database. **`pytest` + FastAPI's `TestClient`** (built on `httpx`) for backend
+  integration tests (see "Backend Testing Infrastructure" below).
+- **Database:** PostgreSQL (database name: `servicd`; a second database, `servicd_test`, exists
+  purely for running the automated test suite against, same schema, kept structurally empty
+  between test runs)
 - **Frontend:** React + TypeScript (via Vite), ESLint for linting, Tailwind CSS v4 for styling
 - **Mobile (future, not started):** Native — Swift/SwiftUI (iOS), Kotlin/Jetpack Compose (Android).
   Chosen over cross-platform frameworks because native feel was prioritized over code sharing.
@@ -64,7 +67,10 @@ get working code fast. When helping:
     (opened a fresh connection per call) — that function has been removed, no longer needed.
     Verified working end-to-end, including that the pool correctly recovers a connection after
     an aborted transaction (tested: a failed `POST /car` request immediately followed by a
-    successful `POST /car_config` on the same pool, no issues).
+    successful `POST /car_config` on the same pool, no issues). Later gained `get_db()`, a
+    generator dependency (`with pool.connection() as conn: yield conn`) that every endpoint now
+    uses via `Depends(get_db)` instead of calling `pool.connection()` directly — see "Backend
+    Testing Infrastructure" below for why.
   - `main.py` — nineteen working FastAPI endpoints, plus a reusable auth dependency:
     - `POST /users`: validates the request body via a Pydantic `UserCreate` model (`username`,
       `password`, optional `name`), hashes the password with `bcrypt.hashpw` (salt embedded
@@ -530,11 +536,74 @@ Note: table is named `users`, not `user` — `user` is a reserved keyword in Pos
   user has explicitly signed off on this tradeoff and wants the hybrid kept as a known upgrade
   path once refresh tokens are built, not dismissed.
 
+## Backend Testing Infrastructure
+First piece of the "Automated tests + CI/CD" priority (see Strategic Direction below). User
+explicitly rejected a pragmatic shortcut (point tests at a separate DB, reset via table
+truncation, don't touch existing endpoint code) in favor of the "correct textbook version,"
+reasoning it's what's actually used in the real world and worth the extra setup cost — this
+governs the design below.
+- **Dependency-injected DB connections.** `db.py` gained `get_db()`, a generator dependency
+  (`with pool.connection() as conn: yield conn`) alongside the existing module-level `pool`.
+  Every one of the 19 database-touching endpoints in `main.py` (all except
+  `GET /vin/{vin}/decode`, which never touches the DB) was refactored from calling
+  `pool.connection()` directly to accepting `conn = Depends(get_db)` as a parameter — this is
+  what makes swapping the connection during tests possible at all, since `Depends()` is the only
+  thing FastAPI lets a test override.
+- **Explicit transaction blocks instead of manual commits.** Every write endpoint's insert/
+  update/delete now runs inside `with conn.transaction():` (auto-commits on clean exit,
+  auto-rolls-back on exception) instead of a manual `conn.commit()` call. Pure `GET` reads
+  stayed as plain `with conn.cursor() as cur:` blocks — nothing to commit. Endpoints with
+  `try`/`except` around specific `psycopg.errors.*` (FK/Unique/Check violations) have the
+  `try` wrap the *outer* `with conn.transaction():` block, so the transaction context manager
+  sees the exception, rolls back, and re-raises it for the `except` to convert into the right
+  `HTTPException`.
+- **`servicd_test` database** — same schema as `servicd` (run from `servicdDB.sql`), used only
+  by the test suite, never by manual dev work. Selected via `backend/.env.test` (git-ignored,
+  same shape as `.env` but with `DB_NAME=servicd_test`); `.gitignore` changed from `.env` to
+  `.env*` so this new file stays ignored too.
+- **`backend/tests/conftest.py`** — the core test infrastructure, built around one problem:
+  endpoint code itself calls "commit" (via `with conn.transaction():`), so a naive "wrap the
+  whole test in a transaction and roll back at the end" won't work, since the endpoint's own
+  commits would already have persisted. Fix: `conn.transaction()`, when called while already
+  inside an active transaction, automatically becomes a **SAVEPOINT** (a nested transaction)
+  instead of a new top-level one — so an outer `with conn.transaction():` opened once per test,
+  wrapping a request through the real `TestClient`, causes every endpoint-internal "commit" to
+  just release a savepoint rather than actually persisting anything, and rolling back the outer
+  transaction undoes all of it. Since `conn.transaction()` has no explicit "please roll back,
+  nothing's wrong" method, a placeholder `Rollback(Exception)` is raised deliberately right
+  after the test body runs and caught immediately outside — the `db_conn` fixture yields the
+  connection, then always raises `Rollback` once the test is done, forcing the rollback whether
+  or not the test itself passed. A second fixture, `client`, depends on `db_conn` and overrides
+  `get_db` (`app.dependency_overrides[get_db] = lambda: (yield db_conn)`) so every request made
+  through the returned `TestClient` uses that same connection/transaction, then clears the
+  override on teardown.
+- **`backend/tests/test_users.py`** and **`backend/tests/test_login.py`** — 4 tests total
+  (`test_create_user`; `test_login_success`, `test_login_wrong_password`,
+  `test_login_nonexistent_username`), covering `POST /users` and `POST /login`. Verified for
+  real, not just "tests pass": after running them, directly queried `servicd_test` via `psql`
+  and confirmed zero rows persisted (including a repeat run, to rule out the first pass being a
+  fluke and to confirm `SERIAL` sequences advancing across rolled-back inserts — expected,
+  harmless — doesn't break anything). Only these two endpoints have dedicated tests so far;
+  the other 17 are refactor-only (DI-compatible, not yet covered by a test file).
+- **Full-codebase refactor verified two ways after completion:** (1) the existing 4-test pytest
+  suite still passes unchanged; (2) a full manual smoke test via `curl` against the real running
+  `servicd` (dev) database, specifically re-exercising the structurally trickiest endpoints —
+  `car_config`/`maintenance_type`/`part`/`service_scheduled`'s `ON CONFLICT` find-or-create
+  flows (repeat calls return the same ID), `car`'s `ForeignKeyViolation`/`UniqueViolation`
+  handling now that the `try`/`except` wraps `with conn.transaction():`, `service`/
+  `service_part`'s ownership-check-then-transactional-write split, `service_scheduled`'s
+  `CheckViolation`, `GET /cars/{car_id}/services`'s `LEFT JOIN` + Python-side grouping (now
+  split across two separate `with conn.cursor()` blocks instead of one), `DELETE
+  /service_part/...`'s `cur.rowcount` check now living inside a transaction block, and
+  `DELETE /car`'s `ON DELETE CASCADE` chain — all confirmed correct, no regressions found.
+
 ## Next Steps (not yet done)
 Backend: all 8 tables have a working, tested `POST` endpoint, plus 5 `GET` endpoints, plus
 `GET /vin/{vin}/decode` (NHTSA integration), plus 4 `DELETE` endpoints (part-from-service,
 service, car, account — in escalating order of blast radius) — full read+write+delete coverage
-with authorization checks everywhere ownership matters.
+with authorization checks everywhere ownership matters. All DB-touching endpoints now use
+dependency-injected connections (`Depends(get_db)`) so tests can override them; 4 pytest tests
+exist so far (`POST /users`, `POST /login`), full suite expansion to the rest still pending.
 
 Frontend: signup, login, the `/cars` dashboard, the car detail page (now including each
 service's attached parts, nested under it, with prices, and delete buttons for the car/each
@@ -544,26 +613,67 @@ attaching a part to a service (`/cars/:carId/services/:serviceId/parts/new`) are
 verified end-to-end. Visual polish pass complete (Tailwind CSS, shared nav/logout, home page).
 Delete-account button in the shared nav.
 
-Next: not yet decided between two candidates, both explicitly called out in the Project
-Overview as this app's core differentiating features and neither touched yet:
-1. **Maintenance recommendations** — `POST /service_scheduled` exists on the backend, but
-   nothing surfaces schedules anywhere, and no logic yet actually calculates "due soon" by
-   combining a car's schedule rules with its service history and current mileage/date.
-2. **Cost insights** — cost-per-mile, cost breakdown by category. Needs new aggregate queries
-   (`SUM`/`GROUP BY`, not used anywhere yet) plus a display page.
+## Strategic Direction (decided — supersedes the plain feature-completion path above)
+Explicitly pivoted away from "just keep building the originally-planned features" toward: make
+this project maximally impressive to recruiters *and* genuinely viable as a real startup pitch.
+Prompted by the user directly asking "ignore the current plan — what would make this impressive
+to recruiters and marketable as a startup," discussed at length, then adopted as the actual path
+forward rather than just a brainstorm. Maintenance recommendations and cost insights (below) are
+**deprioritized, not abandoned** — still the app's stated core differentiators per Project
+Overview, just no longer next in line.
 
-Deployment (this has all been local dev only so far) is a third, lower-priority candidate.
+Priority order:
+1. **Automated tests + CI/CD.** Currently the single most conspicuous gap: this entire project
+   has zero automated tests — every endpoint and every frontend flow has been verified manually
+   via `curl`/`psql`/the browser throughout this whole build. A `pytest` suite for the backend
+   (plus ideally React Testing Library for a few key frontend flows) and GitHub Actions running
+   tests/linting on every push were identified as the first thing a technical reviewer checks
+   for, and the thing that makes every later change safer to make.
+2. **Receipt/photo OCR for logging services.** The top product/business feature: user uploads a
+   photo or PDF of a service receipt, a vision-capable AI extracts maintenance
+   type/mileage/date/parts/prices, and pre-fills `LogServicePage`/`AttachPartPage` for the user
+   to review and confirm before submitting. Chosen over "AI second-guesses the manufacturer's
+   maintenance interval" (also discussed, e.g. "5,000-mile oil changes are better than the
+   10,000-mile factory interval for a 4Runner") — OCR's failure mode is low-risk (user corrects
+   a misread field), whereas AI-generated maintenance-interval advice risks giving wrong
+   mechanical guidance with real consequences. If AI-generated interval advice is ever pursued,
+   "commentary alongside the manufacturer schedule" is the safer framing — supplementary
+   context, never a replacement number. OCR also directly attacks this app category's hardest
+   retention problem (getting users to consistently log data), reuses the exact UX pattern
+   already built for VIN decoding (fetch external data → pre-fill a form → user
+   reviews/edits/confirms), and introduces file/image upload handling, a skill not touched
+   anywhere in this project yet.
+
+Deprioritized (still real, just later):
+- **Maintenance recommendations** — `POST /service_scheduled` exists on the backend, but
+  nothing surfaces schedules anywhere, and no logic yet actually calculates "due soon" by
+  combining a car's schedule rules with its service history and current mileage/date.
+- **Cost insights** — cost-per-mile, cost breakdown by category. Needs new aggregate queries
+  (`SUM`/`GROUP BY`, not used anywhere yet) plus a display page.
+- **Deployment** — this has all been local dev only so far.
 
 ## Future Feature Ideas (not scheduled, just captured)
-- **Receipt/photo OCR for logging services** — user uploads a photo or PDF of a service
-  receipt, a vision-capable AI extracts maintenance type/mileage/date/parts/prices, and
-  pre-fills `LogServicePage`/`AttachPartPage` for the user to review and confirm before
-  submitting. Deliberately favored over "AI second-guesses the manufacturer's maintenance
-  interval" (also discussed) — OCR's failure mode is low-risk (user corrects a misread field),
-  whereas AI-generated maintenance-interval advice risks giving wrong mechanical guidance with
-  real consequences. If pursued later, "AI commentary alongside the manufacturer schedule"
-  (e.g. "many 4Runner owners report changing oil more often than the factory 10k-mile
-  interval") is the safer framing — supplementary context, not a replacement number. OCR also
-  reuses the exact UX pattern already built for VIN decoding (fetch external data → pre-fill a
-  form → user reviews/edits/confirms), and would introduce file/image upload handling, a skill
-  not touched anywhere in this project yet.
+Split by which audience they serve — the strongest ideas serve both.
+
+**Recruiter-facing (demonstrates engineering depth beyond this app's core CRUD):**
+- A live deployed URL (Railway/Render/Fly.io) instead of local-only — a working link beats a
+  README every time.
+- Docker/docker-compose for the whole stack (Postgres + backend + frontend).
+- Rate limiting on auth endpoints (e.g. `slowapi`) — nothing currently stops repeated hammering
+  of `POST /login`.
+- Recall alerts via NHTSA's separate recall API — reuses the exact external-API-integration
+  pattern already built for VIN decoding, cheap to add since it extends a known pattern rather
+  than starting from scratch.
+
+**Startup/business viability (real user value, real differentiation from existing competitors):**
+- Shareable/exportable maintenance history (PDF or a public read-only link) — ties to genuine
+  resale value (a documented service history raises what a car sells for), not just a
+  nice-to-have.
+- Household/multi-user car sharing — families frequently share one vehicle; the schema
+  currently enforces strictly one owner per car.
+- Shop/mechanic-side accounts — let a mechanic log a service directly into a customer's account
+  at checkout instead of the customer typing it in later, solving the data-entry friction
+  problem structurally rather than just making manual entry easier.
+- Aggregated/anonymized insights ("cars like yours typically need X around this mileage") — a
+  feature that gets *more* valuable as the user base grows, the kind of data-network-effect a
+  real investor pitch would care about.
