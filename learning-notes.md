@@ -593,6 +593,123 @@ would keep using that one stale test connection instead of getting a correct new
 resets the app back to its normal behavior for whatever runs next.
 </details>
 
+### Fixture composition (fixtures depending on fixtures)
+- A `@pytest.fixture` is a reusable piece of setup that pytest builds for you and hands to your
+  test — you request it by name as a parameter, you never call it like a normal function. Fixtures
+  can themselves depend on other fixtures the exact same way: by listing them as parameters, not
+  by calling them. Pytest resolves the whole chain bottom-up automatically. `auth_headers`
+  (creates a user, logs in, returns `{"Authorization": "Bearer <token>"}`) depends on `client`,
+  which depends on `db_conn` — a three-layer pyramid built without a single manual function call
+  between the layers.
+
+**Example:**
+```python
+@pytest.fixture
+def db_conn():
+    ...
+
+@pytest.fixture
+def client(db_conn):        # requests db_conn as a parameter — never calls db_conn()
+    ...
+
+@pytest.fixture
+def auth_headers(client):   # requests client as a parameter — never calls client()
+    client.post("/users", json={...})
+    response = client.post("/login", json={...})
+    return {"Authorization": f"Bearer {response.json()['token']}"}
+
+def test_something(client, auth_headers):   # pytest builds the whole chain automatically
+    client.post("/car_config", json={...}, headers=auth_headers)
+```
+
+<details><summary>Check yourself</summary>
+
+What actually goes wrong if a test calls `auth_headers(client)` directly instead of listing
+`auth_headers` as one of its own parameters?
+
+**Answer:** Calling a fixture function directly bypasses pytest's fixture machinery entirely —
+the caching (computing the value once per test, even if referenced multiple times), and any
+cleanup code that would run after a generator-based fixture yields. Recent pytest versions detect
+this and raise an error outright ("fixtures are not meant to be called directly"), specifically to
+stop this mistake from silently producing subtly wrong behavior.
+</details>
+
+### Fixture factories (a fixture that returns a function)
+- A plain fixture like `auth_headers` computes one fixed value, once per test — perfect for "I
+  need one logged-in user." But some tests need *more than one* independent instance of something
+  (e.g. two separate logged-in users, to test that user B gets a `403` acting on user A's car),
+  and you don't know in advance how many. The fix: instead of the fixture returning a value
+  directly, it returns a **function** — the test calls that function as many times as it needs,
+  and each call produces something fresh.
+
+**Example:**
+```python
+@pytest.fixture
+def make_auth_headers(client):
+    counter = 0
+    def create_headers():
+        nonlocal counter          # reach into the enclosing function's variable, not a new local one
+        counter += 1
+        username = f"user_{counter}"
+        client.post("/users", json={"username": username, "password": "pw"})
+        response = client.post("/login", json={"username": username, "password": "pw"})
+        return {"Authorization": f"Bearer {response.json()['token']}"}
+    return create_headers        # hand back the FUNCTION itself, not a call to it
+
+def test_ownership_denied(client, make_auth_headers):
+    owner = make_auth_headers()      # a real, distinct logged-in user
+    intruder = make_auth_headers()   # a second, different real logged-in user
+```
+This is the same idea as a "factory function" in general programming — a function whose job is to
+produce other things on demand — just applied to test setup.
+
+<details><summary>Check yourself</summary>
+
+If the fixture had ended with `return create_headers()` (calling it, with parentheses) instead of
+`return create_headers` (just naming it), what would break?
+
+**Answer:** `create_headers()` calls the inner function immediately, during the fixture's own
+setup, and returns *its result* — one fixed headers dict — instead of returning the function
+itself. Every test using `make_auth_headers` would then only ever get that one single dict (created
+once, whether the test needs one user or five), and there'd be no way to call it again for a
+second user — defeating the entire reason for making it a factory in the first place.
+</details>
+
+### `nonlocal` — reading/writing a variable from an enclosing function
+- A nested function can normally *read* a variable from the function that contains it (this is
+  called a **closure**), but *reassigning* it (`counter += 1`) would normally create a brand new
+  local variable inside the nested function instead of updating the outer one. `nonlocal` tells
+  Python "no — when I modify this name, modify the actual variable from the enclosing function,"
+  which is what lets the counter in `make_auth_headers` actually persist and increment across
+  multiple calls to `create_headers()`.
+
+**Example:**
+```python
+def make_counter():
+    count = 0
+    def increment():
+        nonlocal count
+        count += 1
+        return count
+    return increment
+
+next_value = make_counter()
+print(next_value())  # 1
+print(next_value())  # 2
+print(next_value())  # 3 — the same `count` persists across calls, thanks to nonlocal
+```
+
+<details><summary>Check yourself</summary>
+
+What would happen to the counter in `make_auth_headers` if `nonlocal counter` were removed?
+
+**Answer:** `counter += 1` inside `create_headers` would be treated as creating a brand-new local
+variable named `counter` scoped only to that inner function call — and since it's read (`+= 1`
+reads before writing) before ever being assigned in that scope, Python would actually raise an
+`UnboundLocalError` the first time `create_headers()` runs, rather than silently using the wrong
+value.
+</details>
+
 ---
 
 ## Frontend (React + TypeScript)
