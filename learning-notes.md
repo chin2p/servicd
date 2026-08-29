@@ -566,6 +566,31 @@ the `username` column's `UNIQUE` constraint trying to insert the same username a
 leftover state from a previous run.
 </details>
 
+### Pytest test discovery (why naming matters)
+- By default, pytest only collects and runs functions whose name starts with `test_` (inside
+  files named `test_*.py`, and classes named `Test*`). A function that doesn't match this
+  convention is silently skipped — not an error, not a warning, just quietly never executed.
+
+**Example:**
+```python
+def get_maintenance_types_public(client, auth_headers):   # NOT collected — missing "test_" prefix
+    ...
+    assert response.status_code == 200   # this assertion never actually runs
+
+def test_get_maintenance_types_public(client, auth_headers):   # collected and run normally
+    ...
+```
+
+<details><summary>Check yourself</summary>
+
+Why is a misnamed test function specifically more dangerous than a test that fails?
+
+**Answer:** A failing test is loud — it shows up in red in the test output, demanding attention.
+A misnamed test is silent: the suite reports "N passed" and looks completely healthy, while that
+function's assertions never ran at all. It creates false confidence — you believe an endpoint is
+covered when it genuinely isn't, and nothing in the normal test run output tells you otherwise.
+</details>
+
 ### Dependency overrides for testing
 - `app.dependency_overrides[get_db] = override_get_db` swaps out what `Depends(get_db)` resolves
   to, for the lifetime of the override — every endpoint called through that `TestClient` gets the

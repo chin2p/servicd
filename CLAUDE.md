@@ -577,14 +577,30 @@ governs the design below.
   `get_db` (`app.dependency_overrides[get_db] = lambda: (yield db_conn)`) so every request made
   through the returned `TestClient` uses that same connection/transaction, then clears the
   override on teardown.
-- **`backend/tests/test_users.py`** and **`backend/tests/test_login.py`** — 4 tests total
+- **`backend/tests/test_users.py`** and **`backend/tests/test_login.py`** — the first 4 tests
   (`test_create_user`; `test_login_success`, `test_login_wrong_password`,
   `test_login_nonexistent_username`), covering `POST /users` and `POST /login`. Verified for
   real, not just "tests pass": after running them, directly queried `servicd_test` via `psql`
   and confirmed zero rows persisted (including a repeat run, to rule out the first pass being a
   fluke and to confirm `SERIAL` sequences advancing across rolled-back inserts — expected,
-  harmless — doesn't break anything). Only these two endpoints have dedicated tests so far;
-  the other 17 are refactor-only (DI-compatible, not yet covered by a test file).
+  harmless — doesn't break anything).
+- **Coverage later expanded to all 19 endpoints — 46 tests total across 7 files**, once two more
+  `conftest.py` fixtures existed to support it: `auth_headers` (creates one user via `POST
+  /users` + `POST /login`, returns `{"Authorization": "Bearer <token>"}`) for endpoints requiring
+  auth, and `make_auth_headers` (a **fixture factory** — returns a function the test calls
+  however many times it needs, each call producing an independent logged-in user via a `nonlocal`
+  counter for unique usernames) for the ownership-check (`403`) tests, which need two different
+  users in the same test. Organized one file per resource: `test_car.py` (`car_config`/`car`,
+  including the `ON CONFLICT` idempotency check), `test_service.py` (`service`/`service_part`,
+  including cross-user `403` ownership checks), `test_catalog.py` (`maintenance_type`/`part`/
+  `service_scheduled`, including the `CheckViolation` `400` case), `test_cars_read.py` (all 5
+  `GET`s, including asserting on the `LEFT JOIN`-grouped nested `parts` structure, a service with
+  zero parts still appearing, list results correctly scoped to the requesting user, and the two
+  public catalog `GET`s explicitly called with no `headers=` at all to prove no auth is required),
+  and `test_delete.py` (all 4 `DELETE`s, in the same escalating-blast-radius order as the
+  endpoints themselves — verifying `ON DELETE CASCADE` by checking directly via `db_conn` that a
+  deleted car's service row is also gone, rather than indirectly through another endpoint's
+  behavior, and verifying account deletion the same way against the `users` table).
 - **Full-codebase refactor verified two ways after completion:** (1) the existing 4-test pytest
   suite still passes unchanged; (2) a full manual smoke test via `curl` against the real running
   `servicd` (dev) database, specifically re-exercising the structurally trickiest endpoints —
@@ -602,8 +618,10 @@ Backend: all 8 tables have a working, tested `POST` endpoint, plus 5 `GET` endpo
 `GET /vin/{vin}/decode` (NHTSA integration), plus 4 `DELETE` endpoints (part-from-service,
 service, car, account — in escalating order of blast radius) — full read+write+delete coverage
 with authorization checks everywhere ownership matters. All DB-touching endpoints now use
-dependency-injected connections (`Depends(get_db)`) so tests can override them; 4 pytest tests
-exist so far (`POST /users`, `POST /login`), full suite expansion to the rest still pending.
+dependency-injected connections (`Depends(get_db)`) so tests can override them; pytest coverage
+is now complete across all 19 endpoints (46 tests across 7 files — see "Backend Testing
+Infrastructure" above). GitHub Actions CI (running this suite on every push) is the one piece of
+the "Automated tests + CI/CD" priority still not started.
 
 Frontend: signup, login, the `/cars` dashboard, the car detail page (now including each
 service's attached parts, nested under it, with prices, and delete buttons for the car/each

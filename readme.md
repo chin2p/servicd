@@ -56,8 +56,9 @@ The car detail page shows each service's attached parts and prices, with delete 
 car, each service, and each attached part; account deletion is available from the nav bar.
 
 Backend endpoints use dependency-injected database connections, so tests can swap in a
-transaction that always rolls back afterward — a small `pytest` suite covers `POST /users` and
-`POST /login` so far, with more endpoint coverage planned.
+transaction that always rolls back afterward — a `pytest` suite of 46 tests covers all 19
+endpoints, including ownership checks, validation errors, and cascading deletes. GitHub Actions
+CI is planned next.
 
 ## Getting Started
 
