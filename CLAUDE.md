@@ -620,8 +620,12 @@ service, car, account — in escalating order of blast radius) — full read+wri
 with authorization checks everywhere ownership matters. All DB-touching endpoints now use
 dependency-injected connections (`Depends(get_db)`) so tests can override them; pytest coverage
 is now complete across all 19 endpoints (46 tests across 7 files — see "Backend Testing
-Infrastructure" above). GitHub Actions CI (running this suite on every push) is the one piece of
-the "Automated tests + CI/CD" priority still not started.
+Infrastructure" above). **GitHub Actions CI is live** (`.github/workflows/backend-tests.yml`) —
+runs the full pytest suite against a fresh disposable Postgres service container on every push/PR
+to `main`, verified via a real passing run (all 46 tests green in ~1 minute). Added
+`backend/requirements.txt` (the project had no machine-readable dependency list before this,
+verified by installing it into a completely fresh venv and rerunning the suite from it). This
+completes the "Automated tests + CI/CD" priority.
 
 Frontend: signup, login, the `/cars` dashboard, the car detail page (now including each
 service's attached parts, nested under it, with prices, and delete buttons for the car/each
@@ -641,12 +645,12 @@ forward rather than just a brainstorm. Maintenance recommendations and cost insi
 Overview, just no longer next in line.
 
 Priority order:
-1. **Automated tests + CI/CD.** Currently the single most conspicuous gap: this entire project
-   has zero automated tests — every endpoint and every frontend flow has been verified manually
-   via `curl`/`psql`/the browser throughout this whole build. A `pytest` suite for the backend
-   (plus ideally React Testing Library for a few key frontend flows) and GitHub Actions running
-   tests/linting on every push were identified as the first thing a technical reviewer checks
-   for, and the thing that makes every later change safer to make.
+1. **Automated tests + CI/CD — done.** Backend `pytest` suite (46 tests, all 19 endpoints) plus
+   GitHub Actions running it on every push/PR to `main` are both live (see "Backend Testing
+   Infrastructure" and "Next Steps" above). React Testing Library for key frontend flows was
+   considered but not pursued — not blocking, could still be added later. This was identified as
+   the first thing a technical reviewer checks for, and the thing that makes every later change
+   safer to make.
 2. **Receipt/photo OCR for logging services.** The top product/business feature: user uploads a
    photo or PDF of a service receipt, a vision-capable AI extracts maintenance
    type/mileage/date/parts/prices, and pre-fills `LogServicePage`/`AttachPartPage` for the user

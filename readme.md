@@ -1,5 +1,7 @@
 # Servicd
 
+[![Backend Tests](https://github.com/chin2p/servicd/actions/workflows/backend-tests.yml/badge.svg)](https://github.com/chin2p/servicd/actions/workflows/backend-tests.yml)
+
 A car maintenance tracking web app. Log services and parts for your cars, and get maintenance
 recommendations based on manufacturer schedules (mileage and/or time interval, whichever comes
 first) — plus cost tracking and insights like cost-per-mile and cost breakdown by category.
@@ -58,7 +60,7 @@ car, each service, and each attached part; account deletion is available from th
 Backend endpoints use dependency-injected database connections, so tests can swap in a
 transaction that always rolls back afterward — a `pytest` suite of 46 tests covers all 19
 endpoints, including ownership checks, validation errors, and cascading deletes. GitHub Actions
-CI is planned next.
+runs the full suite against a fresh Postgres instance on every push and pull request.
 
 ## Getting Started
 
