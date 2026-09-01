@@ -630,10 +630,12 @@ completes the "Automated tests + CI/CD" priority.
 Frontend: signup, login, the `/cars` dashboard, the car detail page (now including each
 service's attached parts, nested under it, with prices, and delete buttons for the car/each
 service/each part), adding a car (now a three-step `/cars/new` flow with VIN decoding,
-skip-to-manual, and cancel on every step), logging a service (`/cars/:carId/services/new`), and
-attaching a part to a service (`/cars/:carId/services/:serviceId/parts/new`) are all done and
-verified end-to-end. Visual polish pass complete (Tailwind CSS, shared nav/logout, home page).
-Delete-account button in the shared nav.
+skip-to-manual, and cancel on every step), logging a service (`/cars/:carId/services/new`, now a
+two-step flow — scan a receipt via `POST /receipt/decode` or skip to manual entry, with an
+editable pre-filled parts list), and attaching a part to a service
+(`/cars/:carId/services/:serviceId/parts/new`) are all done and verified end-to-end. Visual
+polish pass complete (Tailwind CSS, shared nav/logout, home page). Delete-account button in the
+shared nav.
 
 ## Strategic Direction (decided — supersedes the plain feature-completion path above)
 Explicitly pivoted away from "just keep building the originally-planned features" toward: make
@@ -651,20 +653,51 @@ Priority order:
    considered but not pursued — not blocking, could still be added later. This was identified as
    the first thing a technical reviewer checks for, and the thing that makes every later change
    safer to make.
-2. **Receipt/photo OCR for logging services.** The top product/business feature: user uploads a
-   photo or PDF of a service receipt, a vision-capable AI extracts maintenance
-   type/mileage/date/parts/prices, and pre-fills `LogServicePage`/`AttachPartPage` for the user
-   to review and confirm before submitting. Chosen over "AI second-guesses the manufacturer's
-   maintenance interval" (also discussed, e.g. "5,000-mile oil changes are better than the
-   10,000-mile factory interval for a 4Runner") — OCR's failure mode is low-risk (user corrects
-   a misread field), whereas AI-generated maintenance-interval advice risks giving wrong
+2. **Receipt/photo OCR for logging services — done.** User uploads a photo or PDF of a service
+   receipt, Claude extracts maintenance type/mileage/date/parts/prices, and it pre-fills
+   `LogServicePage` for review before submitting. Chosen over "AI second-guesses the
+   manufacturer's maintenance interval" (also discussed) — OCR's failure mode is low-risk (user
+   corrects a misread field), whereas AI-generated maintenance-interval advice risks giving wrong
    mechanical guidance with real consequences. If AI-generated interval advice is ever pursued,
    "commentary alongside the manufacturer schedule" is the safer framing — supplementary
-   context, never a replacement number. OCR also directly attacks this app category's hardest
-   retention problem (getting users to consistently log data), reuses the exact UX pattern
-   already built for VIN decoding (fetch external data → pre-fill a form → user
-   reviews/edits/confirms), and introduces file/image upload handling, a skill not touched
-   anywhere in this project yet.
+   context, never a replacement number.
+   - **Backend:** `backend/ai.py` — a module-level `anthropic.Anthropic` client (mirrors `db.py`'s
+     pool-created-once-at-import pattern), reading `ANTHROPIC_API_KEY` from `.env`.
+     `backend/schemas.py` — new file (first Pydantic models split out of `main.py`, a precedent
+     for eventually migrating the other nine); `ReceiptExtraction`/`ExtractedPart` describe the
+     exact JSON shape requested from Claude via `output_format=`, deliberately asking for
+     `price_dollars` (not cents) — reading a printed dollar amount is a safe, verifiable task for
+     the model, while the cents conversion (`round(dollars * 100)`) is done deterministically in
+     Python, same "AI's job should be low-risk" reasoning as the OCR feature choice itself.
+     `POST /receipt/decode` in `main.py` — requires auth (anti-abuse *and* cost-control gate,
+     stronger reasoning than `GET /vin/decode`'s since this triggers a real paid API call, not a
+     free government one), reads the upload via `file.file.read()` (deliberately synchronous,
+     not `await file.read()`, to keep this the only endpoint in the file staying consistent with
+     every other endpoint's plain `def` style rather than becoming the one `async def` outlier),
+     branches on `file.content_type` to build an `"image"` or `"document"` content block, and
+     catches `anthropic.AnthropicError` (confirmed via direct introspection to be the real base
+     class every SDK exception inherits from) → `503`.
+   - **Frontend:** `api.ts`'s `apiFetch` was fixed to conditionally omit the `Content-Type`
+     header when the request body is `FormData` — a hardcoded `application/json` header would
+     have silently broken every file upload, since the browser only auto-fills the required
+     multipart boundary parameter when it's left to set `Content-Type` itself.
+     `LogServicePage.tsx` gained a new step 1 (upload/skip, mirroring `AddCarPage`'s VIN-decode
+     pattern) and an editable parts list in step 2, backed by `updatePart` — a small function
+     demonstrating the "replace one item in an array of state objects immutably" pattern via
+     `.map()` plus a computed property key (`{...part, [field]: value}`), and a **fixture-factory
+     style** reusable across any field. `handleSubmit` was extended with a `for...of` loop
+     (deliberately not `.map()`, since each `POST /service_part` needs to `await` the matching
+     `POST /part` finishing first — sequential, not fire-and-forget) that creates each part after
+     the service exists, skipping any row a user cleared the name on (the only way to "remove" an
+     unwanted OCR-extracted part, since there's no dedicated remove button yet).
+   - **Verified end-to-end for real**, not just via `tsc`/build: a synthetic receipt image driven
+     through an actual headless-Chromium session (Playwright, installed temporarily for this one
+     test and removed afterward — not a project dependency) — uploaded → scanned → form
+     pre-filled with exactly the right values, including the date correctly normalized to
+     `YYYY-MM-DD` after a prompt-wording fix (Claude initially echoed the receipt's printed
+     `MM/DD/YYYY` format verbatim) → submitted → confirmed via direct `psql` query that the
+     `service` and both `service_part` rows landed with correct data, including accurate
+     dollars-to-cents conversion.
 
 Deprioritized (still real, just later):
 - **Maintenance recommendations** — `POST /service_scheduled` exists on the backend, but

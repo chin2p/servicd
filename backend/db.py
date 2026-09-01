@@ -1,6 +1,5 @@
 from dotenv import load_dotenv
 import os
-import psycopg
 from psycopg_pool import ConnectionPool
 
 load_dotenv()
@@ -18,9 +17,5 @@ pool = ConnectionPool(conninfo=f"dbname={db_name} user={db_user} password={db_pa
 def get_db():
     with pool.connection() as conn:
         yield conn
-
-
-
-
 
 

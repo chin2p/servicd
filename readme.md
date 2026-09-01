@@ -12,7 +12,7 @@ cross-platform.
 ## Tech Stack
 
 - **Backend:** Python, FastAPI, Uvicorn, `psycopg` (raw SQL, no ORM) with `psycopg_pool` for
-  connection pooling, `bcrypt` + `pyjwt` for auth
+  connection pooling, `bcrypt` + `pyjwt` for auth, Anthropic's Claude API for receipt-photo OCR
 - **Database:** PostgreSQL
 - **Frontend:** React, TypeScript, Vite, Tailwind CSS
 - **Testing:** `pytest` + FastAPI's `TestClient` for backend integration tests, run against an
@@ -44,13 +44,16 @@ with ownership checks anywhere they matter:
 - `GET /maintenance_types` — browse the maintenance-type catalog (public, no auth needed)
 - `GET /parts` — browse the parts catalog (public, no auth needed)
 - `GET /vin/{vin}/decode` — decode a VIN via NHTSA's public API to auto-fill year/make/model/engine
+- `POST /receipt/decode` — extract maintenance type/mileage/date/parts/prices from a photo or PDF
+  of a service receipt via Claude, to pre-fill the log-a-service form
 - `DELETE /service_part/{service_id}/{part_id}` — remove a part from one of your own services
 - `DELETE /service/{service_id}` — delete one of your own logged services
 - `DELETE /car/{car_id}` — delete one of your own cars (cascades to its service history)
 - `DELETE /users/me` — delete your own account (cascades to all your cars/services/parts)
 
 Frontend has a home page, signup, login, a cars dashboard, a car detail page, an "add a car"
-form (VIN decode with manual-entry fallback), a "log a service" form, and an "attach a part"
+form (VIN decode with manual-entry fallback), a "log a service" form (scan a receipt photo/PDF to
+pre-fill maintenance type/mileage/date/parts, or skip to manual entry), and an "attach a part"
 form working end-to-end (`/`, `/signup`, `/login`, `/cars`, `/cars/:carId`, `/cars/new`,
 `/cars/:carId/services/new`, `/cars/:carId/services/:serviceId/parts/new`), with the JWT stored
 in `localStorage` after login, a shared nav bar with logout, and a Tailwind-styled UI throughout.
@@ -82,10 +85,11 @@ psql servicd -f servicdDB.sql
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install fastapi uvicorn "psycopg[binary]" python-dotenv bcrypt pyjwt psycopg_pool requests
+pip install -r backend/requirements.txt
 ```
 
-Create a `backend/.env` file with your local database credentials and a JWT signing secret:
+Create a `backend/.env` file with your local database credentials, a JWT signing secret, and an
+Anthropic API key (for receipt OCR — get one at [console.anthropic.com](https://console.anthropic.com)):
 
 ```
 DB_NAME=servicd
@@ -94,6 +98,7 @@ DB_PORT=5432
 DB_USER=your_postgres_user
 DB_PASSWORD=
 SECRET_KEY=
+ANTHROPIC_API_KEY=
 ```
 
 Generate a random value for `SECRET_KEY` with:

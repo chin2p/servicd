@@ -1,4 +1,4 @@
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, UploadFile, File
 import psycopg
 from pydantic import BaseModel
 import bcrypt
@@ -9,8 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 import jwt
 from datetime import datetime, date, timedelta, timezone
 import requests
-
-
+import base64
+from ai import client
+from schemas import ReceiptExtraction
+import anthropic
 
 
 class UserCreate(BaseModel):
@@ -285,8 +287,64 @@ def create_service_scheduled(service_scheduled: ServiceScheduledCreate, user_id:
     return {"schedule_id": schedule_id, "config_id": service_scheduled.config_id, "maintenance_type_id": service_scheduled.maintenance_type_id, "mileage_interval": service_scheduled.mileage_interval, "months_interval": service_scheduled.months_interval}
 
 
+@app.post("/receipt/decode")
+def decode_receipt(file: UploadFile = File(), user_id = Depends(get_current_user)):
+    raw_bytes = file.file.read()
+    base64_str = base64.standard_b64encode(raw_bytes).decode("utf-8")
+    block_type = None
 
-#Get end points
+    if file.content_type.startswith("image/"):
+        block_type = "image"
+    elif file.content_type == "application/pdf":
+        block_type = "document"
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+    content_block = {
+        "type": block_type,
+        "source": {
+            "type": "base64",
+            "media_type": file.content_type,
+            "data": base64_str
+        }
+    }
+
+    try:
+        extracted = client.messages.parse(
+            model="claude-opus-5",
+            max_tokens=1024,
+            messages=[{
+                "role": "user",
+                "content": [
+                    content_block,
+                    {
+                        "type": "text",
+                        "text": "This is a car service receipt. Extract the maintenance performed, the mileage at the time of service, the date (formatted as YYYY-MM-DD), and every part/item listed with its name, brand if shown, and price in dollars. Leave any field null if it isn't clearly shown."
+                    }
+                ]
+            }],
+            output_format=ReceiptExtraction,
+        ).parsed_output
+    except anthropic.AnthropicError:
+        raise HTTPException(status_code=503, detail="Unable to process receipt right now")
+
+    parts_list = []
+    for part in extracted.parts:
+        price_cents = round(part.price_dollars * 100) if part.price_dollars is not None else None
+        parts_list.append({"name": part.name, "brand": part.brand, "price_cents": price_cents})
+
+    return {
+        "maintenance_type": extracted.maintenance_type,
+        "miles_at_service": extracted.miles_at_service,
+        "date": extracted.date,
+        "parts": parts_list,
+    }
+        
+
+
+
+#----------------------
+#Get endpoints
 @app.get("/cars")
 def get_cars(user_id: int = Depends(get_current_user), conn = Depends(get_db)):
     with conn.cursor() as cur:
@@ -432,7 +490,9 @@ def vin_decode(vin: str, user_id = Depends(get_current_user)):
     }
 
 
-#Deletion
+
+# -------------------
+#Delete endpoints
 
 @app.delete("/service_part/{service_id}/{part_id}")
 

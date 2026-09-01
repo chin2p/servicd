@@ -2,7 +2,9 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 export default async function apiFetch(path: string, options: RequestInit = {}) {
     const token = localStorage.getItem("token");
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const isFormData = options.body instanceof FormData;
+    const headers: Record<string, string> = isFormData ? {} : { "Content-Type": "application/json" };
+
     if (token) {
         headers["Authorization"] = `Bearer ${token}`;
     }
